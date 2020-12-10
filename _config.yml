@@ -8,7 +8,7 @@ email: newbiesad@gmail.com
 twitter_username: 
 github_username: konekos
 
-baseurl: "/tree" # the subpath of your site, e.g. /blog
+baseurl: "" # the subpath of your site, e.g. /blog
 url: "https://konekos.github.io" # the base hostname & protocol for your site
 
 google_analytics_id: UA-1111111111-1
@@ -24,5 +24,5 @@ sass:
 
 exclude: [vendor]
 
-picpath: /tree/assets/img
+picpath: /assets/img
 
