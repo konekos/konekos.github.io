@@ -1,0 +1,284 @@
+I"ܒ<h2 id="基本用法">基本用法</h2>
+
+<p><code class="language-plaintext highlighter-rouge">CompletableFuture</code> 比<code class="language-plaintext highlighter-rouge">Future</code>功能更强。</p>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kd">public</span> <span class="kd">class</span> <span class="nc">CompletableFutureTest</span> <span class="o">{</span>
+
+    <span class="kd">public</span> <span class="kd">static</span> <span class="kt">void</span> <span class="nf">main</span><span class="o">(</span><span class="nc">String</span><span class="o">[]</span> <span class="n">args</span><span class="o">)</span> <span class="kd">throws</span> <span class="nc">ExecutionException</span><span class="o">,</span> <span class="nc">InterruptedException</span> <span class="o">{</span>
+        <span class="nc">CompletableFuture</span><span class="o">&lt;</span><span class="nc">Integer</span><span class="o">&gt;</span> <span class="n">completableFuture</span> <span class="o">=</span> <span class="k">new</span> <span class="nc">CompletableFuture</span><span class="o">&lt;&gt;();</span>
+
+        <span class="k">new</span> <span class="nf">Thread</span><span class="o">(()</span> <span class="o">-&gt;</span> <span class="o">{</span>
+            <span class="kt">int</span> <span class="n">i</span> <span class="o">=</span> <span class="n">get</span><span class="o">();</span>
+            <span class="n">completableFuture</span><span class="o">.</span><span class="na">complete</span><span class="o">(</span><span class="n">i</span><span class="o">);</span>
+        <span class="o">}).</span><span class="na">start</span><span class="o">();</span>
+
+        <span class="nc">System</span><span class="o">.</span><span class="na">out</span><span class="o">.</span><span class="na">println</span><span class="o">(</span><span class="s">"non block"</span><span class="o">);</span>
+
+        <span class="c1">//Optional.ofNullable(completableFuture.get()).ifPresent(System.out::println);</span>
+
+        <span class="n">completableFuture</span><span class="o">.</span><span class="na">whenComplete</span><span class="o">((</span><span class="n">i</span><span class="o">,</span> <span class="n">t</span><span class="o">)</span> <span class="o">-&gt;</span> <span class="o">{</span>
+            <span class="nc">Optional</span><span class="o">.</span><span class="na">ofNullable</span><span class="o">(</span><span class="n">i</span><span class="o">).</span><span class="na">ifPresent</span><span class="o">(</span><span class="nc">System</span><span class="o">.</span><span class="na">out</span><span class="o">::</span><span class="n">println</span><span class="o">);</span>
+            <span class="nc">Optional</span><span class="o">.</span><span class="na">ofNullable</span><span class="o">(</span><span class="n">t</span><span class="o">).</span><span class="na">ifPresent</span><span class="o">(</span><span class="nl">Throwable:</span><span class="o">:</span><span class="n">printStackTrace</span><span class="o">);</span>
+        <span class="o">});</span>
+        <span class="nc">System</span><span class="o">.</span><span class="na">out</span><span class="o">.</span><span class="na">println</span><span class="o">(</span><span class="s">"non block"</span><span class="o">);</span>
+    <span class="o">}</span>
+
+    <span class="kd">private</span> <span class="kd">static</span> <span class="kt">int</span> <span class="nf">get</span><span class="o">()</span> <span class="o">{</span>
+        <span class="k">try</span> <span class="o">{</span>
+            <span class="nc">Thread</span><span class="o">.</span><span class="na">sleep</span><span class="o">(</span><span class="mi">2000</span><span class="o">);</span>
+        <span class="o">}</span> <span class="k">catch</span> <span class="o">(</span><span class="nc">InterruptedException</span> <span class="n">e</span><span class="o">)</span> <span class="o">{</span>
+            <span class="n">e</span><span class="o">.</span><span class="na">printStackTrace</span><span class="o">();</span>
+        <span class="o">}</span>
+        <span class="k">return</span> <span class="mi">1</span><span class="o">;</span>
+    <span class="o">}</span>
+<span class="o">}</span>
+</code></pre></div></div>
+
+<p><code class="language-plaintext highlighter-rouge">get()</code>阻塞等待结果。</p>
+
+<p><code class="language-plaintext highlighter-rouge">whenComplete</code>是非阻塞的，传入<code class="language-plaintext highlighter-rouge">BiConsumer</code>，泛型类型和<code class="language-plaintext highlighter-rouge">Throwable</code>两个参数的lamda表达式。</p>
+
+<h2 id="supplyasync">supplyAsync</h2>
+
+<p>一般很少使用new的方式使用，直接使用静态方法。</p>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kd">public</span> <span class="kd">class</span> <span class="nc">CompletableFutureTest2</span> <span class="o">{</span>
+
+    <span class="kd">public</span> <span class="kd">static</span> <span class="kt">void</span> <span class="nf">main</span><span class="o">(</span><span class="nc">String</span><span class="o">[]</span> <span class="n">args</span><span class="o">)</span> <span class="kd">throws</span> <span class="nc">ExecutionException</span><span class="o">,</span> <span class="nc">InterruptedException</span> <span class="o">{</span>
+        <span class="nc">CompletableFuture</span><span class="o">.</span><span class="na">supplyAsync</span><span class="o">(</span><span class="nl">CompletableFutureTest2:</span><span class="o">:</span><span class="n">get</span><span class="o">)</span>
+                <span class="o">.</span><span class="na">whenComplete</span><span class="o">((</span><span class="n">i</span><span class="o">,</span> <span class="n">t</span><span class="o">)</span> <span class="o">-&gt;</span> <span class="o">{</span>
+                    <span class="nc">Optional</span><span class="o">.</span><span class="na">ofNullable</span><span class="o">(</span><span class="n">i</span><span class="o">).</span><span class="na">ifPresent</span><span class="o">(</span><span class="nc">System</span><span class="o">.</span><span class="na">out</span><span class="o">::</span><span class="n">println</span><span class="o">);</span>
+                    <span class="nc">Optional</span><span class="o">.</span><span class="na">ofNullable</span><span class="o">(</span><span class="n">t</span><span class="o">).</span><span class="na">ifPresent</span><span class="o">(</span><span class="nl">Throwable:</span><span class="o">:</span><span class="n">printStackTrace</span><span class="o">);</span>
+                <span class="o">});</span>
+<span class="c1">//                .join();</span>
+<span class="c1">//                .get();</span>
+        <span class="nc">System</span><span class="o">.</span><span class="na">out</span><span class="o">.</span><span class="na">println</span><span class="o">(</span><span class="s">"non-block"</span><span class="o">);</span>
+        <span class="c1">//dont exit</span>
+        <span class="nc">Thread</span><span class="o">.</span><span class="na">currentThread</span><span class="o">().</span><span class="na">join</span><span class="o">();</span>
+    <span class="o">}</span>
+
+    <span class="kd">private</span> <span class="kd">static</span> <span class="kt">int</span> <span class="nf">get</span><span class="o">()</span> <span class="o">{</span>
+        <span class="k">try</span> <span class="o">{</span>
+            <span class="nc">System</span><span class="o">.</span><span class="na">out</span><span class="o">.</span><span class="na">println</span><span class="o">(</span><span class="s">"Daemon-"</span><span class="o">+</span><span class="nc">Thread</span><span class="o">.</span><span class="na">currentThread</span><span class="o">().</span><span class="na">isDaemon</span><span class="o">());</span>
+            <span class="nc">Thread</span><span class="o">.</span><span class="na">sleep</span><span class="o">(</span><span class="mi">2000</span><span class="o">);</span>
+        <span class="o">}</span> <span class="k">catch</span> <span class="o">(</span><span class="nc">InterruptedException</span> <span class="n">e</span><span class="o">)</span> <span class="o">{</span>
+            <span class="n">e</span><span class="o">.</span><span class="na">printStackTrace</span><span class="o">();</span>
+        <span class="o">}</span>
+        <span class="k">return</span> <span class="mi">1</span><span class="o">;</span>
+    <span class="o">}</span>
+<span class="o">}</span>
+</code></pre></div></div>
+
+<p>输出</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Daemon-true Name-ForkJoinPool.commonPool-worker-1
+non-block
+1
+</code></pre></div></div>
+
+<p><code class="language-plaintext highlighter-rouge">supplyAsync</code> 默认是往内置的<code class="language-plaintext highlighter-rouge">ForkJoinPool</code>提交<code class="language-plaintext highlighter-rouge">isDaemon</code>为true的线程。</p>
+
+<p>所以我们要让main join自己，使main不会退出。不然我们提交的Runnable还没执行到，main就退出了。</p>
+
+<p><code class="language-plaintext highlighter-rouge">supplyAsync</code>也可以手动指定线程池，如果其<code class="language-plaintext highlighter-rouge">ThreadFactory</code>内返回的线程是非守护线程，也是不会退出的。</p>
+
+<p>我们当然也可以手动使用<code class="language-plaintext highlighter-rouge">get()</code>或<code class="language-plaintext highlighter-rouge">join()</code>阻塞住。</p>
+
+<h2 id="流水线工作">流水线工作</h2>
+
+<p>get()之后，将get的结果乘以1000</p>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kd">public</span> <span class="kd">class</span> <span class="nc">CompletableFutureTest3</span> <span class="o">{</span>
+
+    <span class="kd">public</span> <span class="kd">static</span> <span class="kt">void</span> <span class="nf">main</span><span class="o">(</span><span class="nc">String</span><span class="o">[]</span> <span class="n">args</span><span class="o">)</span> <span class="kd">throws</span> <span class="nc">ExecutionException</span><span class="o">,</span> <span class="nc">InterruptedException</span> <span class="o">{</span>
+        <span class="nc">CompletableFuture</span><span class="o">.</span><span class="na">supplyAsync</span><span class="o">(</span><span class="nl">CompletableFutureTest3:</span><span class="o">:</span><span class="n">get</span><span class="o">)</span>
+                <span class="o">.</span><span class="na">thenApply</span><span class="o">(</span><span class="nl">CompletableFutureTest3:</span><span class="o">:</span><span class="n">multiply</span><span class="o">)</span>
+                <span class="o">.</span><span class="na">whenComplete</span><span class="o">((</span><span class="n">i</span><span class="o">,</span> <span class="n">t</span><span class="o">)</span> <span class="o">-&gt;</span> <span class="o">{</span>
+                    <span class="nc">Optional</span><span class="o">.</span><span class="na">ofNullable</span><span class="o">(</span><span class="n">i</span><span class="o">).</span><span class="na">ifPresent</span><span class="o">(</span><span class="nc">System</span><span class="o">.</span><span class="na">out</span><span class="o">::</span><span class="n">println</span><span class="o">);</span>
+                    <span class="nc">Optional</span><span class="o">.</span><span class="na">ofNullable</span><span class="o">(</span><span class="n">t</span><span class="o">).</span><span class="na">ifPresent</span><span class="o">(</span><span class="nl">Throwable:</span><span class="o">:</span><span class="n">printStackTrace</span><span class="o">);</span>
+                <span class="o">}).</span><span class="na">join</span><span class="o">();</span>
+    <span class="o">}</span>
+
+    <span class="kd">private</span> <span class="kd">static</span> <span class="kt">int</span> <span class="nf">get</span><span class="o">()</span> <span class="o">{</span>
+        <span class="k">try</span> <span class="o">{</span>
+            <span class="nc">System</span><span class="o">.</span><span class="na">out</span><span class="o">.</span><span class="na">println</span><span class="o">(</span><span class="s">"Daemon-"</span> <span class="o">+</span> <span class="nc">Thread</span><span class="o">.</span><span class="na">currentThread</span><span class="o">().</span><span class="na">isDaemon</span><span class="o">()</span> <span class="o">+</span> <span class="s">" Name-"</span> <span class="o">+</span> <span class="nc">Thread</span><span class="o">.</span><span class="na">currentThread</span><span class="o">().</span><span class="na">getName</span><span class="o">());</span>
+            <span class="nc">Thread</span><span class="o">.</span><span class="na">sleep</span><span class="o">(</span><span class="mi">2000</span><span class="o">);</span>
+        <span class="o">}</span> <span class="k">catch</span> <span class="o">(</span><span class="nc">InterruptedException</span> <span class="n">e</span><span class="o">)</span> <span class="o">{</span>
+            <span class="n">e</span><span class="o">.</span><span class="na">printStackTrace</span><span class="o">();</span>
+        <span class="o">}</span>
+        <span class="k">return</span> <span class="mi">1</span><span class="o">;</span>
+    <span class="o">}</span>
+
+    <span class="kd">private</span> <span class="kd">static</span> <span class="kt">int</span> <span class="nf">multiply</span><span class="o">(</span><span class="kt">int</span> <span class="n">i</span><span class="o">)</span> <span class="o">{</span>
+        <span class="k">try</span> <span class="o">{</span>
+            <span class="nc">Thread</span><span class="o">.</span><span class="na">sleep</span><span class="o">(</span><span class="mi">300</span><span class="o">);</span>
+        <span class="o">}</span> <span class="k">catch</span> <span class="o">(</span><span class="nc">InterruptedException</span> <span class="n">e</span><span class="o">)</span> <span class="o">{</span>
+            <span class="n">e</span><span class="o">.</span><span class="na">printStackTrace</span><span class="o">();</span>
+        <span class="o">}</span>
+        <span class="k">return</span> <span class="n">i</span> <span class="o">*</span> <span class="mi">1000</span><span class="o">;</span>
+    <span class="o">}</span>
+<span class="o">}</span>
+</code></pre></div></div>
+
+<p><code class="language-plaintext highlighter-rouge">thenApply</code>使用前一步的返回值作为参数。</p>
+
+<p>如果我们对一组 int 进行这个操作，并且将结果求和，如何做呢？</p>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kd">public</span> <span class="kd">class</span> <span class="nc">CompletableFutureTest3</span> <span class="o">{</span>
+
+    <span class="kd">public</span> <span class="kd">static</span> <span class="kt">void</span> <span class="nf">main</span><span class="o">(</span><span class="nc">String</span><span class="o">[]</span> <span class="n">args</span><span class="o">)</span> <span class="kd">throws</span> <span class="nc">ExecutionException</span><span class="o">,</span> <span class="nc">InterruptedException</span> <span class="o">{</span>
+        <span class="nc">List</span><span class="o">&lt;</span><span class="nc">Integer</span><span class="o">&gt;</span> <span class="n">list</span> <span class="o">=</span> <span class="nc">Arrays</span><span class="o">.</span><span class="na">asList</span><span class="o">(</span><span class="mi">1</span><span class="o">,</span> <span class="mi">2</span><span class="o">,</span> <span class="mi">3</span><span class="o">,</span> <span class="mi">4</span><span class="o">,</span> <span class="mi">5</span><span class="o">,</span> <span class="mi">6</span><span class="o">,</span> <span class="mi">7</span><span class="o">,</span> <span class="mi">8</span><span class="o">,</span> <span class="mi">9</span><span class="o">,</span> <span class="mi">10</span><span class="o">);</span>
+        <span class="kt">int</span> <span class="n">sum</span> <span class="o">=</span> <span class="n">list</span><span class="o">.</span><span class="na">stream</span><span class="o">().</span><span class="na">map</span><span class="o">(</span><span class="n">i</span> <span class="o">-&gt;</span> <span class="nc">CompletableFuture</span><span class="o">.</span><span class="na">supplyAsync</span><span class="o">(()</span> <span class="o">-&gt;</span> <span class="n">iGet</span><span class="o">(</span><span class="n">i</span><span class="o">)))</span>
+                <span class="o">.</span><span class="na">map</span><span class="o">(</span><span class="n">cf</span> <span class="o">-&gt;</span> <span class="n">cf</span><span class="o">.</span><span class="na">thenApply</span><span class="o">(</span><span class="nl">CompletableFutureTest3:</span><span class="o">:</span><span class="n">multiply</span><span class="o">))</span>
+                <span class="o">.</span><span class="na">map</span><span class="o">(</span><span class="n">cf</span><span class="o">-&gt;</span><span class="n">cf</span><span class="o">.</span><span class="na">whenComplete</span><span class="o">((</span><span class="n">i</span><span class="o">,</span><span class="n">t</span><span class="o">)-&gt;{</span>
+                    <span class="nc">Optional</span><span class="o">.</span><span class="na">ofNullable</span><span class="o">(</span><span class="n">i</span><span class="o">).</span><span class="na">ifPresent</span><span class="o">(</span><span class="nc">System</span><span class="o">.</span><span class="na">out</span><span class="o">::</span><span class="n">println</span><span class="o">);</span>
+                    <span class="nc">Optional</span><span class="o">.</span><span class="na">ofNullable</span><span class="o">(</span><span class="n">t</span><span class="o">).</span><span class="na">ifPresent</span><span class="o">(</span><span class="nl">Throwable:</span><span class="o">:</span><span class="n">printStackTrace</span><span class="o">);</span>
+                <span class="o">}))</span>
+                <span class="o">.</span><span class="na">map</span><span class="o">(</span><span class="nl">CompletableFuture:</span><span class="o">:</span><span class="n">join</span><span class="o">)</span>
+                <span class="o">.</span><span class="na">mapToInt</span><span class="o">(</span><span class="n">value</span> <span class="o">-&gt;</span> <span class="n">value</span><span class="o">).</span><span class="na">sum</span><span class="o">();</span>
+        <span class="nc">System</span><span class="o">.</span><span class="na">out</span><span class="o">.</span><span class="na">println</span><span class="o">(</span><span class="s">"sum: "</span> <span class="o">+</span> <span class="n">sum</span><span class="o">);</span>
+    <span class="o">}</span>
+    
+    <span class="kd">private</span> <span class="kd">static</span> <span class="kt">int</span> <span class="nf">iGet</span><span class="o">(</span><span class="kt">int</span> <span class="n">i</span><span class="o">)</span> <span class="o">{</span>
+        <span class="k">try</span> <span class="o">{</span>
+            <span class="nc">System</span><span class="o">.</span><span class="na">out</span><span class="o">.</span><span class="na">println</span><span class="o">(</span><span class="s">"i="</span> <span class="o">+</span> <span class="n">i</span> <span class="o">+</span> <span class="s">" Name: "</span> <span class="o">+</span> <span class="nc">Thread</span><span class="o">.</span><span class="na">currentThread</span><span class="o">().</span><span class="na">getName</span><span class="o">());</span>
+            <span class="nc">Thread</span><span class="o">.</span><span class="na">sleep</span><span class="o">(</span><span class="n">i</span> <span class="o">*</span> <span class="mi">100</span><span class="o">);</span>
+        <span class="o">}</span> <span class="k">catch</span> <span class="o">(</span><span class="nc">InterruptedException</span> <span class="n">e</span><span class="o">)</span> <span class="o">{</span>
+            <span class="n">e</span><span class="o">.</span><span class="na">printStackTrace</span><span class="o">();</span>
+        <span class="o">}</span>
+        <span class="k">return</span> <span class="n">i</span><span class="o">;</span>
+    <span class="o">}</span>
+
+    <span class="kd">private</span> <span class="kd">static</span> <span class="kt">int</span> <span class="nf">multiply</span><span class="o">(</span><span class="kt">int</span> <span class="n">i</span><span class="o">)</span> <span class="o">{</span>
+        <span class="k">try</span> <span class="o">{</span>
+            <span class="nc">Thread</span><span class="o">.</span><span class="na">sleep</span><span class="o">(</span><span class="mi">300</span><span class="o">);</span>
+        <span class="o">}</span> <span class="k">catch</span> <span class="o">(</span><span class="nc">InterruptedException</span> <span class="n">e</span><span class="o">)</span> <span class="o">{</span>
+            <span class="n">e</span><span class="o">.</span><span class="na">printStackTrace</span><span class="o">();</span>
+        <span class="o">}</span>
+        <span class="k">return</span> <span class="n">i</span> <span class="o">*</span> <span class="mi">1000</span><span class="o">;</span>
+    <span class="o">}</span>
+<span class="o">}</span>
+</code></pre></div></div>
+
+<p>输出</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>i=1 Name: ForkJoinPool.commonPool-worker-1
+1000
+i=2 Name: ForkJoinPool.commonPool-worker-1
+2000
+i=3 Name: ForkJoinPool.commonPool-worker-1
+3000
+i=4 Name: ForkJoinPool.commonPool-worker-1
+4000
+i=5 Name: ForkJoinPool.commonPool-worker-1
+5000
+i=6 Name: ForkJoinPool.commonPool-worker-1
+6000
+i=7 Name: ForkJoinPool.commonPool-worker-1
+7000
+i=8 Name: ForkJoinPool.commonPool-worker-1
+8000
+i=9 Name: ForkJoinPool.commonPool-worker-1
+9000
+i=10 Name: ForkJoinPool.commonPool-worker-1
+10000
+sum: 55000
+</code></pre></div></div>
+
+<p>结合Stream，很轻松就做到了。根据结果是串行的。</p>
+
+<h2 id="常用-api">常用 API</h2>
+
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">supplyAsync</code></li>
+  <li><code class="language-plaintext highlighter-rouge">thenApply</code>  value</li>
+  <li><code class="language-plaintext highlighter-rouge">whenComplete</code></li>
+  <li><code class="language-plaintext highlighter-rouge">whenCompleteAsync</code></li>
+  <li><code class="language-plaintext highlighter-rouge">handle</code> value , throwable</li>
+  <li><code class="language-plaintext highlighter-rouge">thenRun</code> runnable</li>
+  <li><code class="language-plaintext highlighter-rouge">thenAccpet</code> consumer 返回void</li>
+  <li><code class="language-plaintext highlighter-rouge">thenCompose</code></li>
+  <li><code class="language-plaintext highlighter-rouge">thenCombine</code></li>
+  <li><code class="language-plaintext highlighter-rouge">thenAcceptBoth</code></li>
+</ul>
+
+<p>带<code class="language-plaintext highlighter-rouge">Async</code>的都是提交异步的方法。</p>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nc">CompletableFuture</span><span class="o">.</span><span class="na">supplyAsync</span><span class="o">(()</span> <span class="o">-&gt;</span> <span class="mi">1</span><span class="o">)</span>
+                <span class="o">.</span><span class="na">thenCompose</span><span class="o">(</span><span class="n">i</span> <span class="o">-&gt;</span> <span class="nc">CompletableFuture</span><span class="o">.</span><span class="na">supplyAsync</span><span class="o">(()</span> <span class="o">-&gt;</span> <span class="mi">10</span> <span class="o">*</span> <span class="n">i</span><span class="o">))</span>
+                <span class="o">.</span><span class="na">thenAccept</span><span class="o">(</span><span class="nc">System</span><span class="o">.</span><span class="na">out</span><span class="o">::</span><span class="n">println</span><span class="o">);</span>
+
+        <span class="nc">CompletableFuture</span><span class="o">.</span><span class="na">supplyAsync</span><span class="o">(()</span> <span class="o">-&gt;</span> <span class="mi">1</span><span class="o">)</span>
+                <span class="o">.</span><span class="na">thenCombine</span><span class="o">(</span><span class="nc">CompletableFuture</span><span class="o">.</span><span class="na">supplyAsync</span><span class="o">(()</span> <span class="o">-&gt;</span> <span class="mi">2</span><span class="o">),</span> <span class="nl">Integer:</span><span class="o">:</span><span class="n">sum</span><span class="o">)</span>
+                <span class="o">.</span><span class="na">thenAccept</span><span class="o">(</span><span class="nc">System</span><span class="o">.</span><span class="na">out</span><span class="o">::</span><span class="n">println</span><span class="o">);</span>
+
+        <span class="nc">CompletableFuture</span><span class="o">.</span><span class="na">supplyAsync</span><span class="o">(()</span> <span class="o">-&gt;</span> <span class="mi">1</span><span class="o">)</span>
+                <span class="o">.</span><span class="na">thenAcceptBoth</span><span class="o">(</span><span class="nc">CompletableFuture</span><span class="o">.</span><span class="na">supplyAsync</span><span class="o">(()</span> <span class="o">-&gt;</span> <span class="mi">2</span><span class="o">),</span> <span class="o">(</span><span class="n">r1</span><span class="o">,</span> <span class="n">r2</span><span class="o">)</span> <span class="o">-&gt;</span> <span class="o">{</span>
+                    <span class="nc">System</span><span class="o">.</span><span class="na">out</span><span class="o">.</span><span class="na">println</span><span class="o">(</span><span class="n">r1</span><span class="o">+</span><span class="n">r2</span><span class="o">);</span>
+                <span class="o">});</span>
+</code></pre></div></div>
+
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">runAfterBoth</code></li>
+  <li><code class="language-plaintext highlighter-rouge">applyToEither</code></li>
+  <li><code class="language-plaintext highlighter-rouge">acceptEither</code></li>
+  <li><code class="language-plaintext highlighter-rouge">runAfterEither</code></li>
+  <li><code class="language-plaintext highlighter-rouge">anyOf</code></li>
+  <li><code class="language-plaintext highlighter-rouge">allOf</code></li>
+</ul>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kd">public</span> <span class="kd">static</span> <span class="kt">void</span> <span class="nf">main</span><span class="o">(</span><span class="nc">String</span><span class="o">[]</span> <span class="n">args</span><span class="o">)</span> <span class="o">{</span>
+        <span class="nc">CompletableFuture</span><span class="o">.</span><span class="na">supplyAsync</span><span class="o">(()</span> <span class="o">-&gt;</span> <span class="mi">1</span><span class="o">)</span>
+                <span class="o">.</span><span class="na">runAfterBoth</span><span class="o">(</span><span class="nc">CompletableFuture</span><span class="o">.</span><span class="na">supplyAsync</span><span class="o">(()</span> <span class="o">-&gt;</span> <span class="mi">1</span><span class="o">),</span> <span class="o">()</span> <span class="o">-&gt;</span> <span class="nc">System</span><span class="o">.</span><span class="na">out</span><span class="o">.</span><span class="na">println</span><span class="o">(</span><span class="s">"done"</span><span class="o">)).</span><span class="na">join</span><span class="o">();</span>
+
+
+        <span class="c1">//两个有一个结束即可</span>
+        <span class="nc">CompletableFuture</span><span class="o">.</span><span class="na">supplyAsync</span><span class="o">(()</span> <span class="o">-&gt;</span> <span class="o">{</span>
+            <span class="k">try</span> <span class="o">{</span>
+                <span class="nc">Thread</span><span class="o">.</span><span class="na">sleep</span><span class="o">(</span><span class="mi">100</span><span class="o">);</span>
+            <span class="o">}</span> <span class="k">catch</span> <span class="o">(</span><span class="nc">InterruptedException</span> <span class="n">e</span><span class="o">)</span> <span class="o">{</span>
+                <span class="n">e</span><span class="o">.</span><span class="na">printStackTrace</span><span class="o">();</span>
+            <span class="o">}</span>
+            <span class="k">return</span> <span class="mi">1</span><span class="o">;</span>
+        <span class="o">})</span>
+                <span class="o">.</span><span class="na">applyToEither</span><span class="o">(</span><span class="nc">CompletableFuture</span><span class="o">.</span><span class="na">supplyAsync</span><span class="o">(()</span> <span class="o">-&gt;</span> <span class="mi">2</span><span class="o">),</span> <span class="n">i</span> <span class="o">-&gt;</span> <span class="n">i</span> <span class="o">*</span> <span class="mi">10</span><span class="o">)</span>
+                <span class="o">.</span><span class="na">thenAccept</span><span class="o">(</span><span class="nc">System</span><span class="o">.</span><span class="na">out</span><span class="o">::</span><span class="n">println</span><span class="o">);</span>
+
+        <span class="c1">//不需要返回值</span>
+        <span class="nc">CompletableFuture</span><span class="o">.</span><span class="na">supplyAsync</span><span class="o">(()</span> <span class="o">-&gt;</span> <span class="o">{</span>
+            <span class="k">try</span> <span class="o">{</span>
+                <span class="nc">Thread</span><span class="o">.</span><span class="na">sleep</span><span class="o">(</span><span class="mi">100</span><span class="o">);</span>
+            <span class="o">}</span> <span class="k">catch</span> <span class="o">(</span><span class="nc">InterruptedException</span> <span class="n">e</span><span class="o">)</span> <span class="o">{</span>
+                <span class="n">e</span><span class="o">.</span><span class="na">printStackTrace</span><span class="o">();</span>
+            <span class="o">}</span>
+            <span class="k">return</span> <span class="mi">1</span><span class="o">;</span>
+        <span class="o">}).</span><span class="na">acceptEither</span><span class="o">(</span><span class="nc">CompletableFuture</span><span class="o">.</span><span class="na">supplyAsync</span><span class="o">(()</span> <span class="o">-&gt;</span> <span class="mi">2</span><span class="o">),</span> <span class="nc">System</span><span class="o">.</span><span class="na">out</span><span class="o">::</span><span class="n">println</span><span class="o">);</span>
+
+        <span class="c1">//不消费either的结果</span>
+        <span class="nc">CompletableFuture</span><span class="o">.</span><span class="na">supplyAsync</span><span class="o">(()</span> <span class="o">-&gt;</span> <span class="o">{</span>
+            <span class="k">try</span> <span class="o">{</span>
+                <span class="nc">Thread</span><span class="o">.</span><span class="na">sleep</span><span class="o">(</span><span class="mi">100</span><span class="o">);</span>
+            <span class="o">}</span> <span class="k">catch</span> <span class="o">(</span><span class="nc">InterruptedException</span> <span class="n">e</span><span class="o">)</span> <span class="o">{</span>
+                <span class="n">e</span><span class="o">.</span><span class="na">printStackTrace</span><span class="o">();</span>
+            <span class="o">}</span>
+            <span class="k">return</span> <span class="mi">1</span><span class="o">;</span>
+        <span class="o">}).</span><span class="na">runAfterEither</span><span class="o">(</span><span class="nc">CompletableFuture</span><span class="o">.</span><span class="na">supplyAsync</span><span class="o">(()</span> <span class="o">-&gt;</span> <span class="mi">2</span><span class="o">),</span> <span class="o">()-&gt;</span> <span class="nc">System</span><span class="o">.</span><span class="na">out</span><span class="o">.</span><span class="na">println</span><span class="o">(</span><span class="s">"done"</span><span class="o">)).</span><span class="na">join</span><span class="o">();</span>
+
+
+        <span class="c1">//所有的执行完</span>
+        <span class="nc">List</span><span class="o">&lt;</span><span class="nc">CompletableFuture</span><span class="o">&lt;</span><span class="nc">Integer</span><span class="o">&gt;&gt;</span> <span class="n">collect</span> <span class="o">=</span> <span class="nc">Arrays</span><span class="o">.</span><span class="na">asList</span><span class="o">(</span><span class="mi">1</span><span class="o">,</span> <span class="mi">2</span><span class="o">,</span> <span class="mi">3</span><span class="o">,</span> <span class="mi">4</span><span class="o">,</span> <span class="mi">5</span><span class="o">).</span><span class="na">stream</span><span class="o">()</span>
+                <span class="o">.</span><span class="na">map</span><span class="o">(</span><span class="n">i</span> <span class="o">-&gt;</span> <span class="nc">CompletableFuture</span><span class="o">.</span><span class="na">supplyAsync</span><span class="o">(()</span> <span class="o">-&gt;</span> <span class="n">get</span><span class="o">(</span><span class="n">i</span><span class="o">))).</span><span class="na">collect</span><span class="o">(</span><span class="nc">Collectors</span><span class="o">.</span><span class="na">toList</span><span class="o">());</span>
+        <span class="nc">CompletableFuture</span><span class="o">[]</span> <span class="n">futures</span> <span class="o">=</span> <span class="k">new</span> <span class="nc">CompletableFuture</span><span class="o">[</span><span class="n">collect</span><span class="o">.</span><span class="na">size</span><span class="o">()];</span>
+        <span class="nc">CompletableFuture</span><span class="o">.</span><span class="na">allOf</span><span class="o">(</span><span class="n">collect</span><span class="o">.</span><span class="na">toArray</span><span class="o">(</span><span class="n">futures</span><span class="o">))</span>
+                <span class="o">.</span><span class="na">thenRun</span><span class="o">(()-&gt;</span> <span class="nc">System</span><span class="o">.</span><span class="na">out</span><span class="o">.</span><span class="na">println</span><span class="o">(</span><span class="s">"done"</span><span class="o">)).</span><span class="na">join</span><span class="o">();</span>
+
+        <span class="c1">//任意一个执行完</span>
+        <span class="nc">List</span><span class="o">&lt;</span><span class="nc">CompletableFuture</span><span class="o">&lt;</span><span class="nc">Integer</span><span class="o">&gt;&gt;</span> <span class="n">collect1</span> <span class="o">=</span> <span class="nc">Arrays</span><span class="o">.</span><span class="na">asList</span><span class="o">(</span><span class="mi">1</span><span class="o">,</span> <span class="mi">2</span><span class="o">,</span> <span class="mi">3</span><span class="o">,</span> <span class="mi">4</span><span class="o">,</span> <span class="mi">5</span><span class="o">).</span><span class="na">stream</span><span class="o">()</span>
+                <span class="o">.</span><span class="na">map</span><span class="o">(</span><span class="n">i</span> <span class="o">-&gt;</span> <span class="nc">CompletableFuture</span><span class="o">.</span><span class="na">supplyAsync</span><span class="o">(()</span> <span class="o">-&gt;</span> <span class="n">get</span><span class="o">(</span><span class="n">i</span><span class="o">))).</span><span class="na">collect</span><span class="o">(</span><span class="nc">Collectors</span><span class="o">.</span><span class="na">toList</span><span class="o">());</span>
+        <span class="nc">CompletableFuture</span><span class="o">[]</span> <span class="n">futures1</span> <span class="o">=</span> <span class="k">new</span> <span class="nc">CompletableFuture</span><span class="o">[</span><span class="n">collect1</span><span class="o">.</span><span class="na">size</span><span class="o">()];</span>
+        <span class="nc">CompletableFuture</span><span class="o">.</span><span class="na">anyOf</span><span class="o">(</span><span class="n">collect1</span><span class="o">.</span><span class="na">toArray</span><span class="o">(</span><span class="n">futures1</span><span class="o">))</span>
+                <span class="o">.</span><span class="na">thenRun</span><span class="o">(()</span> <span class="o">-&gt;</span> <span class="nc">System</span><span class="o">.</span><span class="na">out</span><span class="o">.</span><span class="na">println</span><span class="o">(</span><span class="s">"done"</span><span class="o">)).</span><span class="na">join</span><span class="o">();</span>
+    <span class="o">}</span>
+</code></pre></div></div>
+
+:ET

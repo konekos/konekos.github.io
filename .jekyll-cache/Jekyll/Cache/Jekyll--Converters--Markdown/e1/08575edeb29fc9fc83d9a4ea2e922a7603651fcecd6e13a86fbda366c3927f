@@ -1,0 +1,363 @@
+I"է<h2 id="双亲委托机制">双亲委托机制</h2>
+
+<ol>
+  <li>类加载器的委托是优先交给父类加载器先去尝试加载</li>
+  <li>父加载器和子加载器是一种包含关系（父亲被包含，非继承）</li>
+</ol>
+
+<h2 id="三个类加载器的关系">三个类加载器的关系</h2>
+
+<p><code class="language-plaintext highlighter-rouge">BootStrapClassLoader</code>: c++实现。</p>
+
+<p><code class="language-plaintext highlighter-rouge">ExtClassLoader</code> 和 <code class="language-plaintext highlighter-rouge">AppClassLoader</code>: 在 <code class="language-plaintext highlighter-rouge">sun.misc.Launcher</code>类。</p>
+
+<p>首先看<code class="language-plaintext highlighter-rouge">ClassLoader</code>类：</p>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kd">public</span> <span class="kd">abstract</span> <span class="kd">class</span> <span class="nc">ClassLoader</span> <span class="o">{</span>
+
+    <span class="kd">private</span> <span class="kd">static</span> <span class="kd">native</span> <span class="kt">void</span> <span class="nf">registerNatives</span><span class="o">();</span>
+    <span class="kd">static</span> <span class="o">{</span>
+        <span class="n">registerNatives</span><span class="o">();</span>
+    <span class="o">}</span>
+
+    <span class="c1">// The parent class loader for delegation</span>
+    <span class="c1">// Note: VM hardcoded the offset of this field, thus all new fields</span>
+    <span class="c1">// must be added *after* it.</span>
+    <span class="c1">//这里即是所谓的父类，其实只是一个成员变量。子类的成员变量为父类。</span>
+    <span class="kd">private</span> <span class="kd">final</span> <span class="nc">ClassLoader</span> <span class="n">parent</span><span class="o">;</span>
+<span class="o">...</span>
+</code></pre></div></div>
+
+<p>后两个类加载器：</p>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kd">static</span> <span class="kd">class</span> <span class="nc">AppClassLoader</span> <span class="kd">extends</span> <span class="nc">URLClassLoader</span> <span class="o">{</span>
+<span class="o">...</span>
+<span class="o">}</span>
+<span class="kd">static</span> <span class="kd">class</span> <span class="nc">ExtClassLoader</span> <span class="kd">extends</span> <span class="nc">URLClassLoader</span> <span class="o">{</span>
+<span class="o">...</span>
+<span class="o">}</span>
+</code></pre></div></div>
+
+<p>继承关系</p>
+
+<p><img src="/assets/img/image-20200115232749606.png" alt="image-20200115232749606" /></p>
+
+<p>可以看到并不是extends的继承，所谓的父类加载器只是包含关系。</p>
+
+<p>再看<code class="language-plaintext highlighter-rouge">Launcher</code>构造器</p>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kd">public</span> <span class="nf">Launcher</span><span class="o">()</span> <span class="o">{</span>
+        <span class="nc">Launcher</span><span class="o">.</span><span class="na">ExtClassLoader</span> <span class="n">var1</span><span class="o">;</span>
+        <span class="k">try</span> <span class="o">{</span>
+            <span class="c1">//初始化ExtClassLoader</span>
+            <span class="n">var1</span> <span class="o">=</span> <span class="nc">Launcher</span><span class="o">.</span><span class="na">ExtClassLoader</span><span class="o">.</span><span class="na">getExtClassLoader</span><span class="o">();</span>
+        <span class="o">}</span> <span class="k">catch</span> <span class="o">(</span><span class="nc">IOException</span> <span class="n">var10</span><span class="o">)</span> <span class="o">{</span>
+            <span class="k">throw</span> <span class="k">new</span> <span class="nf">InternalError</span><span class="o">(</span><span class="s">"Could not create extension class loader"</span><span class="o">,</span> <span class="n">var10</span><span class="o">);</span>
+        <span class="o">}</span>
+
+        <span class="k">try</span> <span class="o">{</span>
+            <span class="c1">//这里把上面的 ExtClassLoader 传进来了。</span>
+            <span class="k">this</span><span class="o">.</span><span class="na">loader</span> <span class="o">=</span> <span class="nc">Launcher</span><span class="o">.</span><span class="na">AppClassLoader</span><span class="o">.</span><span class="na">getAppClassLoader</span><span class="o">(</span><span class="n">var1</span><span class="o">);</span>
+        <span class="o">}</span> <span class="k">catch</span> <span class="o">(</span><span class="nc">IOException</span> <span class="n">var9</span><span class="o">)</span> <span class="o">{</span>
+            <span class="k">throw</span> <span class="k">new</span> <span class="nf">InternalError</span><span class="o">(</span><span class="s">"Could not create application class loader"</span><span class="o">,</span> <span class="n">var9</span><span class="o">);</span>
+        <span class="o">}</span>
+
+        <span class="nc">Thread</span><span class="o">.</span><span class="na">currentThread</span><span class="o">().</span><span class="na">setContextClassLoader</span><span class="o">(</span><span class="k">this</span><span class="o">.</span><span class="na">loader</span><span class="o">);</span>
+        <span class="nc">String</span> <span class="n">var2</span> <span class="o">=</span> <span class="nc">System</span><span class="o">.</span><span class="na">getProperty</span><span class="o">(</span><span class="s">"java.security.manager"</span><span class="o">);</span>
+        <span class="k">if</span> <span class="o">(</span><span class="n">var2</span> <span class="o">!=</span> <span class="kc">null</span><span class="o">)</span> <span class="o">{</span>
+            <span class="nc">SecurityManager</span> <span class="n">var3</span> <span class="o">=</span> <span class="kc">null</span><span class="o">;</span>
+            <span class="k">if</span> <span class="o">(!</span><span class="s">""</span><span class="o">.</span><span class="na">equals</span><span class="o">(</span><span class="n">var2</span><span class="o">)</span> <span class="o">&amp;&amp;</span> <span class="o">!</span><span class="s">"default"</span><span class="o">.</span><span class="na">equals</span><span class="o">(</span><span class="n">var2</span><span class="o">))</span> <span class="o">{</span>
+                <span class="k">try</span> <span class="o">{</span>
+                    <span class="n">var3</span> <span class="o">=</span> <span class="o">(</span><span class="nc">SecurityManager</span><span class="o">)</span><span class="k">this</span><span class="o">.</span><span class="na">loader</span><span class="o">.</span><span class="na">loadClass</span><span class="o">(</span><span class="n">var2</span><span class="o">).</span><span class="na">newInstance</span><span class="o">();</span>
+                <span class="o">}</span> <span class="k">catch</span> <span class="o">(</span><span class="nc">IllegalAccessException</span> <span class="n">var5</span><span class="o">)</span> <span class="o">{</span>
+                <span class="o">}</span> <span class="k">catch</span> <span class="o">(</span><span class="nc">InstantiationException</span> <span class="n">var6</span><span class="o">)</span> <span class="o">{</span>
+                <span class="o">}</span> <span class="k">catch</span> <span class="o">(</span><span class="nc">ClassNotFoundException</span> <span class="n">var7</span><span class="o">)</span> <span class="o">{</span>
+                <span class="o">}</span> <span class="k">catch</span> <span class="o">(</span><span class="nc">ClassCastException</span> <span class="n">var8</span><span class="o">)</span> <span class="o">{</span>
+                <span class="o">}</span>
+            <span class="o">}</span> <span class="k">else</span> <span class="o">{</span>
+                <span class="n">var3</span> <span class="o">=</span> <span class="k">new</span> <span class="nc">SecurityManager</span><span class="o">();</span>
+            <span class="o">}</span>
+
+            <span class="k">if</span> <span class="o">(</span><span class="n">var3</span> <span class="o">==</span> <span class="kc">null</span><span class="o">)</span> <span class="o">{</span>
+                <span class="k">throw</span> <span class="k">new</span> <span class="nf">InternalError</span><span class="o">(</span><span class="s">"Could not create SecurityManager: "</span> <span class="o">+</span> <span class="n">var2</span><span class="o">);</span>
+            <span class="o">}</span>
+
+            <span class="nc">System</span><span class="o">.</span><span class="na">setSecurityManager</span><span class="o">(</span><span class="n">var3</span><span class="o">);</span>
+        <span class="o">}</span>
+
+    <span class="o">}</span>
+</code></pre></div></div>
+
+<p>进入<code class="language-plaintext highlighter-rouge">getAppClassLoader</code>方法</p>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kd">public</span> <span class="kd">static</span> <span class="nc">ClassLoader</span> <span class="nf">getAppClassLoader</span><span class="o">(</span><span class="kd">final</span> <span class="nc">ClassLoader</span> <span class="n">var0</span><span class="o">)</span> <span class="kd">throws</span> <span class="nc">IOException</span> <span class="o">{</span>
+    <span class="kd">final</span> <span class="nc">String</span> <span class="n">var1</span> <span class="o">=</span> <span class="nc">System</span><span class="o">.</span><span class="na">getProperty</span><span class="o">(</span><span class="s">"java.class.path"</span><span class="o">);</span>
+    <span class="kd">final</span> <span class="nc">File</span><span class="o">[]</span> <span class="n">var2</span> <span class="o">=</span> <span class="n">var1</span> <span class="o">==</span> <span class="kc">null</span> <span class="o">?</span> <span class="k">new</span> <span class="nc">File</span><span class="o">[</span><span class="mi">0</span><span class="o">]</span> <span class="o">:</span> <span class="nc">Launcher</span><span class="o">.</span><span class="na">getClassPath</span><span class="o">(</span><span class="n">var1</span><span class="o">);</span>
+    <span class="k">return</span> <span class="o">(</span><span class="nc">ClassLoader</span><span class="o">)</span><span class="nc">AccessController</span><span class="o">.</span><span class="na">doPrivileged</span><span class="o">(</span><span class="k">new</span> <span class="nc">PrivilegedAction</span><span class="o">&lt;</span><span class="nc">Launcher</span><span class="o">.</span><span class="na">AppClassLoader</span><span class="o">&gt;()</span> <span class="o">{</span>
+        <span class="kd">public</span> <span class="nc">Launcher</span><span class="o">.</span><span class="na">AppClassLoader</span> <span class="nf">run</span><span class="o">()</span> <span class="o">{</span>
+            <span class="no">URL</span><span class="o">[]</span> <span class="n">var1x</span> <span class="o">=</span> <span class="n">var1</span> <span class="o">==</span> <span class="kc">null</span> <span class="o">?</span> <span class="k">new</span> <span class="no">URL</span><span class="o">[</span><span class="mi">0</span><span class="o">]</span> <span class="o">:</span> <span class="nc">Launcher</span><span class="o">.</span><span class="na">pathToURLs</span><span class="o">(</span><span class="n">var2</span><span class="o">);</span>
+            <span class="k">return</span> <span class="k">new</span> <span class="nc">Launcher</span><span class="o">.</span><span class="na">AppClassLoader</span><span class="o">(</span><span class="n">var1x</span><span class="o">,</span> <span class="n">var0</span><span class="o">);</span>
+        <span class="o">}</span>
+    <span class="o">});</span>
+<span class="o">}</span>
+</code></pre></div></div>
+
+<p>发现刚才传入的<code class="language-plaintext highlighter-rouge">ExtClassLoader</code>作为构造器的第二个参数。一直找下去发现在<code class="language-plaintext highlighter-rouge">ClassLoader</code>的构造器赋值。</p>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kd">private</span> <span class="nf">ClassLoader</span><span class="o">(</span><span class="nc">Void</span> <span class="n">unused</span><span class="o">,</span> <span class="nc">ClassLoader</span> <span class="n">parent</span><span class="o">)</span> <span class="o">{</span><span class="err">\</span>
+    	<span class="c1">//</span>
+        <span class="k">this</span><span class="o">.</span><span class="na">parent</span> <span class="o">=</span> <span class="n">parent</span><span class="o">;</span>
+        <span class="k">if</span> <span class="o">(</span><span class="nc">ParallelLoaders</span><span class="o">.</span><span class="na">isRegistered</span><span class="o">(</span><span class="k">this</span><span class="o">.</span><span class="na">getClass</span><span class="o">()))</span> <span class="o">{</span>
+            <span class="n">parallelLockMap</span> <span class="o">=</span> <span class="k">new</span> <span class="nc">ConcurrentHashMap</span><span class="o">&lt;&gt;();</span>
+            <span class="n">package2certs</span> <span class="o">=</span> <span class="k">new</span> <span class="nc">ConcurrentHashMap</span><span class="o">&lt;&gt;();</span>
+            <span class="n">domains</span> <span class="o">=</span>
+                <span class="nc">Collections</span><span class="o">.</span><span class="na">synchronizedSet</span><span class="o">(</span><span class="k">new</span> <span class="nc">HashSet</span><span class="o">&lt;</span><span class="nc">ProtectionDomain</span><span class="o">&gt;());</span>
+            <span class="n">assertionLock</span> <span class="o">=</span> <span class="k">new</span> <span class="nc">Object</span><span class="o">();</span>
+        <span class="o">}</span> <span class="k">else</span> <span class="o">{</span>
+            <span class="c1">// no finer-grained lock; lock on the classloader instance</span>
+            <span class="n">parallelLockMap</span> <span class="o">=</span> <span class="kc">null</span><span class="o">;</span>
+            <span class="n">package2certs</span> <span class="o">=</span> <span class="k">new</span> <span class="nc">Hashtable</span><span class="o">&lt;&gt;();</span>
+            <span class="n">domains</span> <span class="o">=</span> <span class="k">new</span> <span class="nc">HashSet</span><span class="o">&lt;&gt;();</span>
+            <span class="n">assertionLock</span> <span class="o">=</span> <span class="k">this</span><span class="o">;</span>
+        <span class="o">}</span>
+    <span class="o">}</span>
+</code></pre></div></div>
+
+<h2 id="具体委托的过程">具体委托的过程</h2>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kd">protected</span> <span class="nc">Class</span><span class="o">&lt;?&gt;</span> <span class="n">loadClass</span><span class="o">(</span><span class="nc">String</span> <span class="n">name</span><span class="o">,</span> <span class="kt">boolean</span> <span class="n">resolve</span><span class="o">)</span>
+    <span class="kd">throws</span> <span class="nc">ClassNotFoundException</span>
+<span class="o">{</span>
+    <span class="kd">synchronized</span> <span class="o">(</span><span class="n">getClassLoadingLock</span><span class="o">(</span><span class="n">name</span><span class="o">))</span> <span class="o">{</span>
+        <span class="c1">// First, check if the class has already been loaded</span>
+        <span class="c1">//首先检查是不是已经加载过了</span>
+        <span class="nc">Class</span><span class="o">&lt;?&gt;</span> <span class="n">c</span> <span class="o">=</span> <span class="n">findLoadedClass</span><span class="o">(</span><span class="n">name</span><span class="o">);</span>
+        <span class="k">if</span> <span class="o">(</span><span class="n">c</span> <span class="o">==</span> <span class="kc">null</span><span class="o">)</span> <span class="o">{</span>
+            <span class="c1">//c是null没有加载过</span>
+            <span class="kt">long</span> <span class="n">t0</span> <span class="o">=</span> <span class="nc">System</span><span class="o">.</span><span class="na">nanoTime</span><span class="o">();</span>
+            <span class="k">try</span> <span class="o">{</span>
+                <span class="c1">//如果parent不是空，就调用parent的load方法，parent</span>
+                <span class="c1">//一样会执行到这里，递归调用直到parent为null</span>
+                <span class="k">if</span> <span class="o">(</span><span class="n">parent</span> <span class="o">!=</span> <span class="kc">null</span><span class="o">)</span> <span class="o">{</span>
+                    <span class="n">c</span> <span class="o">=</span> <span class="n">parent</span><span class="o">.</span><span class="na">loadClass</span><span class="o">(</span><span class="n">name</span><span class="o">,</span> <span class="kc">false</span><span class="o">);</span>
+                <span class="o">}</span> <span class="k">else</span> <span class="o">{</span>
+                    <span class="c1">//parent是空，说明是Bootstrap ClassLoader</span>
+                    <span class="n">c</span> <span class="o">=</span> <span class="n">findBootstrapClassOrNull</span><span class="o">(</span><span class="n">name</span><span class="o">);</span>
+                <span class="o">}</span>
+            <span class="o">}</span> <span class="k">catch</span> <span class="o">(</span><span class="nc">ClassNotFoundException</span> <span class="n">e</span><span class="o">)</span> <span class="o">{</span>
+                <span class="c1">// ClassNotFoundException thrown if class not found</span>
+                <span class="c1">// from the non-null parent class loader</span>
+            <span class="o">}</span>
+			<span class="c1">//走到这里说明一直向上找到bootstrap都没有找到，则调用该类加载器的findClass方法。</span>
+            <span class="k">if</span> <span class="o">(</span><span class="n">c</span> <span class="o">==</span> <span class="kc">null</span><span class="o">)</span> <span class="o">{</span>
+                <span class="c1">// If still not found, then invoke findClass in order</span>
+                <span class="c1">// to find the class.</span>
+                <span class="kt">long</span> <span class="n">t1</span> <span class="o">=</span> <span class="nc">System</span><span class="o">.</span><span class="na">nanoTime</span><span class="o">();</span>
+                <span class="n">c</span> <span class="o">=</span> <span class="n">findClass</span><span class="o">(</span><span class="n">name</span><span class="o">);</span>
+
+                <span class="c1">// this is the defining class loader; record the stats</span>
+                <span class="n">sun</span><span class="o">.</span><span class="na">misc</span><span class="o">.</span><span class="na">PerfCounter</span><span class="o">.</span><span class="na">getParentDelegationTime</span><span class="o">().</span><span class="na">addTime</span><span class="o">(</span><span class="n">t1</span> <span class="o">-</span> <span class="n">t0</span><span class="o">);</span>
+                <span class="n">sun</span><span class="o">.</span><span class="na">misc</span><span class="o">.</span><span class="na">PerfCounter</span><span class="o">.</span><span class="na">getFindClassTime</span><span class="o">().</span><span class="na">addElapsedTimeFrom</span><span class="o">(</span><span class="n">t1</span><span class="o">);</span>
+                <span class="n">sun</span><span class="o">.</span><span class="na">misc</span><span class="o">.</span><span class="na">PerfCounter</span><span class="o">.</span><span class="na">getFindClasses</span><span class="o">().</span><span class="na">increment</span><span class="o">();</span>
+            <span class="o">}</span>
+        <span class="o">}</span>
+        <span class="k">if</span> <span class="o">(</span><span class="n">resolve</span><span class="o">)</span> <span class="o">{</span>
+            <span class="n">resolveClass</span><span class="o">(</span><span class="n">c</span><span class="o">);</span>
+        <span class="o">}</span>
+        <span class="k">return</span> <span class="n">c</span><span class="o">;</span>
+    <span class="o">}</span>
+<span class="o">}</span>
+</code></pre></div></div>
+
+<h2 id="打破双亲委托机制">打破双亲委托机制</h2>
+
+<p>自定义<code class="language-plaintext highlighter-rouge">MyClassLoader</code>，继承<code class="language-plaintext highlighter-rouge">ClassLoader</code>抽象类，重写<code class="language-plaintext highlighter-rouge">loadClass(String name, boolean resolve)</code>即可。</p>
+
+<p>例如：</p>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kd">public</span> <span class="kd">class</span> <span class="nc">CustomClassLoader</span> <span class="kd">extends</span> <span class="nc">ClassLoader</span><span class="o">{</span>
+    
+    <span class="nd">@Override</span>
+    <span class="kd">protected</span> <span class="nc">Class</span><span class="o">&lt;?&gt;</span> <span class="n">findClass</span><span class="o">(</span><span class="nc">String</span> <span class="n">name</span><span class="o">)</span> <span class="kd">throws</span> <span class="nc">ClassNotFoundException</span> <span class="o">{</span>
+        <span class="c1">//自己实现从资源读取字节流返回Class</span>
+    <span class="o">}</span>
+
+    <span class="nd">@Override</span>
+    <span class="kd">protected</span> <span class="nc">Class</span><span class="o">&lt;?&gt;</span> <span class="n">loadClass</span><span class="o">(</span><span class="nc">String</span> <span class="n">name</span><span class="o">,</span> <span class="kt">boolean</span> <span class="n">resolve</span><span class="o">)</span> <span class="kd">throws</span> <span class="nc">ClassNotFoundException</span> <span class="o">{</span>
+        <span class="nc">Class</span><span class="o">&lt;?&gt;</span> <span class="n">clazz</span> <span class="o">=</span> <span class="kc">null</span><span class="o">;</span>
+		<span class="c1">//java开头的，简单的认为是java自己的class，我们自己的class用自定义classLoader加载，</span>
+        <span class="c1">//java自己的类还是用SystemClassLoader去加载。</span>
+        <span class="k">if</span> <span class="o">(</span><span class="n">name</span><span class="o">.</span><span class="na">startsWith</span><span class="o">(</span><span class="s">"java."</span><span class="o">))</span> <span class="o">{</span>
+            <span class="k">try</span> <span class="o">{</span>
+                <span class="n">clazz</span> <span class="o">=</span> <span class="nc">ClassLoader</span><span class="o">.</span><span class="na">getSystemClassLoader</span><span class="o">().</span><span class="na">loadClass</span><span class="o">(</span><span class="n">name</span><span class="o">);</span>
+                <span class="k">if</span> <span class="o">(</span><span class="n">clazz</span> <span class="o">!=</span> <span class="kc">null</span><span class="o">)</span> <span class="o">{</span>
+                    <span class="k">if</span> <span class="o">(</span><span class="n">resolve</span><span class="o">)</span> <span class="o">{</span>
+                        <span class="n">resolveClass</span><span class="o">(</span><span class="n">clazz</span><span class="o">);</span>
+                    <span class="o">}</span>
+                <span class="o">}</span>
+            <span class="o">}</span> <span class="k">catch</span> <span class="o">(</span><span class="nc">Exception</span> <span class="n">e</span><span class="o">)</span> <span class="o">{</span>
+                <span class="c1">//ignore</span>
+            <span class="o">}</span>
+        <span class="o">}</span>
+		<span class="c1">//自己实现的加载Class的方法</span>
+        <span class="k">try</span> <span class="o">{</span>
+            <span class="n">clazz</span> <span class="o">=</span> <span class="n">findClass</span><span class="o">(</span><span class="n">name</span><span class="o">);</span>
+        <span class="o">}</span> <span class="k">catch</span> <span class="o">(</span><span class="nc">Exception</span> <span class="n">e</span><span class="o">)</span> <span class="o">{</span>
+            <span class="c1">//...</span>
+        <span class="o">}</span>
+		<span class="c1">//如果加载不了并且parent不是空，由父类去找</span>
+        <span class="k">if</span> <span class="o">(</span><span class="n">clazz</span> <span class="o">==</span> <span class="kc">null</span> <span class="o">&amp;&amp;</span> <span class="n">getParent</span><span class="o">()</span> <span class="o">!=</span> <span class="kc">null</span><span class="o">)</span> <span class="o">{</span>
+            <span class="n">getParent</span><span class="o">().</span><span class="na">loadClass</span><span class="o">(</span><span class="n">name</span><span class="o">);</span>
+        <span class="o">}</span>
+        <span class="k">return</span> <span class="n">clazz</span><span class="o">;</span>
+    <span class="o">}</span>
+<span class="o">}</span>
+</code></pre></div></div>
+
+<p>这样就简单地实现了从父类往子类找的类加载器。</p>
+
+<p>可不可以用这种方式加载String？</p>
+
+<p>答案是不行的，Java 对 java.lang 包做了保护。会抛出异常：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>java.lang.SecurityException: Prohibited package name: java.lang
+</code></pre></div></div>
+
+<h2 id="线程上下文类加载器">线程上下文类加载器</h2>
+
+<p>SPI（Service Provider Interface）</p>
+
+<p>rt.jar里定义了规范，例如 JDBC，JNDI，JMS，都是接口。规范由各厂商自己去实现。</p>
+
+<p>以JDBC MySQL为例。</p>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nc">Connection</span> <span class="n">conn</span> <span class="o">=</span> <span class="kc">null</span><span class="o">;</span>
+<span class="nc">Statement</span> <span class="n">stmt</span> <span class="o">=</span> <span class="kc">null</span><span class="o">;</span>
+<span class="nc">Class</span><span class="o">.</span><span class="na">forName</span><span class="o">(</span><span class="s">"com.mysql.jdbc.Driver"</span><span class="o">);</span>
+<span class="n">conn</span> <span class="o">=</span> <span class="nc">DriverManager</span><span class="o">.</span><span class="na">getConnection</span><span class="o">(</span><span class="s">"..."</span><span class="o">);</span>
+</code></pre></div></div>
+
+<p><code class="language-plaintext highlighter-rouge">Connection</code> <code class="language-plaintext highlighter-rouge">Statement</code>都是都是java.sql包下的，我们只是对MySQL的Driver反射了一下，<code class="language-plaintext highlighter-rouge">Connection</code> <code class="language-plaintext highlighter-rouge">Statement</code>这些不都是由<code class="language-plaintext highlighter-rouge">BootStrap ClassLoader</code>去加载吗，但是加载的这些空实现又有什么意义？显然，<code class="language-plaintext highlighter-rouge">BootStrap ClassLoader</code>并不能加载到具体实现，是由App去加载的。这样就违反了双亲委托机制。先看MySQL的Driver。</p>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kd">public</span> <span class="kd">class</span> <span class="nc">Driver</span> <span class="kd">extends</span> <span class="nc">NonRegisteringDriver</span> <span class="kd">implements</span> <span class="n">java</span><span class="o">.</span><span class="na">sql</span><span class="o">.</span><span class="na">Driver</span> <span class="o">{</span>
+    <span class="c1">//</span>
+    <span class="c1">// Register ourselves with the DriverManager</span>
+    <span class="c1">//</span>
+    <span class="kd">static</span> <span class="o">{</span>
+        <span class="k">try</span> <span class="o">{</span>
+            <span class="n">java</span><span class="o">.</span><span class="na">sql</span><span class="o">.</span><span class="na">DriverManager</span><span class="o">.</span><span class="na">registerDriver</span><span class="o">(</span><span class="k">new</span> <span class="nc">Driver</span><span class="o">());</span>
+        <span class="o">}</span> <span class="k">catch</span> <span class="o">(</span><span class="nc">SQLException</span> <span class="no">E</span><span class="o">)</span> <span class="o">{</span>
+            <span class="k">throw</span> <span class="k">new</span> <span class="nf">RuntimeException</span><span class="o">(</span><span class="s">"Can't register driver!"</span><span class="o">);</span>
+        <span class="o">}</span>
+    <span class="o">}</span>
+</code></pre></div></div>
+
+<p>反射会执行static，在<code class="language-plaintext highlighter-rouge">DriverManager</code>完成了注册。</p>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kd">public</span> <span class="kd">static</span> <span class="kd">synchronized</span> <span class="kt">void</span> <span class="nf">registerDriver</span><span class="o">(</span><span class="n">java</span><span class="o">.</span><span class="na">sql</span><span class="o">.</span><span class="na">Driver</span> <span class="n">driver</span><span class="o">,</span>
+            <span class="nc">DriverAction</span> <span class="n">da</span><span class="o">)</span>
+        <span class="kd">throws</span> <span class="nc">SQLException</span> <span class="o">{</span>
+
+        <span class="cm">/* Register the driver if it has not already been added to our list */</span>
+        <span class="k">if</span><span class="o">(</span><span class="n">driver</span> <span class="o">!=</span> <span class="kc">null</span><span class="o">)</span> <span class="o">{</span>
+            <span class="n">registeredDrivers</span><span class="o">.</span><span class="na">addIfAbsent</span><span class="o">(</span><span class="k">new</span> <span class="nc">DriverInfo</span><span class="o">(</span><span class="n">driver</span><span class="o">,</span> <span class="n">da</span><span class="o">));</span>
+        <span class="o">}</span> <span class="k">else</span> <span class="o">{</span>
+            <span class="c1">// This is for compatibility with the original DriverManager</span>
+            <span class="k">throw</span> <span class="k">new</span> <span class="nf">NullPointerException</span><span class="o">();</span>
+        <span class="o">}</span>
+
+        <span class="n">println</span><span class="o">(</span><span class="s">"registerDriver: "</span> <span class="o">+</span> <span class="n">driver</span><span class="o">);</span>
+
+    <span class="o">}</span>
+</code></pre></div></div>
+
+<p>注册只是往<code class="language-plaintext highlighter-rouge">registeredDrivers</code>这个<code class="language-plaintext highlighter-rouge">CopyOnWriteArrayList</code>里add，没有其他操作。</p>
+
+<p>继续看实际实现的<code class="language-plaintext highlighter-rouge">Driver</code>类是如何被加载的。</p>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code> <span class="c1">//  Worker method called by the public getConnection() methods.</span>
+    <span class="kd">private</span> <span class="kd">static</span> <span class="nc">Connection</span> <span class="nf">getConnection</span><span class="o">(</span>
+        <span class="nc">String</span> <span class="n">url</span><span class="o">,</span> <span class="n">java</span><span class="o">.</span><span class="na">util</span><span class="o">.</span><span class="na">Properties</span> <span class="n">info</span><span class="o">,</span> <span class="nc">Class</span><span class="o">&lt;?&gt;</span> <span class="n">caller</span><span class="o">)</span> <span class="kd">throws</span> <span class="nc">SQLException</span> <span class="o">{</span>
+        <span class="cm">/*
+         * When callerCl is null, we should check the application's
+         * (which is invoking this class indirectly)
+         * classloader, so that the JDBC driver class outside rt.jar
+         * can be loaded from here.
+         */</span>
+        <span class="nc">ClassLoader</span> <span class="n">callerCL</span> <span class="o">=</span> <span class="n">caller</span> <span class="o">!=</span> <span class="kc">null</span> <span class="o">?</span> <span class="n">caller</span><span class="o">.</span><span class="na">getClassLoader</span><span class="o">()</span> <span class="o">:</span> <span class="kc">null</span><span class="o">;</span>
+        <span class="kd">synchronized</span><span class="o">(</span><span class="nc">DriverManager</span><span class="o">.</span><span class="na">class</span><span class="o">)</span> <span class="o">{</span>
+            <span class="c1">// synchronize loading of the correct classloader.</span>
+            <span class="k">if</span> <span class="o">(</span><span class="n">callerCL</span> <span class="o">==</span> <span class="kc">null</span><span class="o">)</span> <span class="o">{</span>
+                <span class="n">callerCL</span> <span class="o">=</span> <span class="nc">Thread</span><span class="o">.</span><span class="na">currentThread</span><span class="o">().</span><span class="na">getContextClassLoader</span><span class="o">();</span>
+            <span class="o">}</span>
+        <span class="o">}</span>
+
+        <span class="k">if</span><span class="o">(</span><span class="n">url</span> <span class="o">==</span> <span class="kc">null</span><span class="o">)</span> <span class="o">{</span>
+            <span class="k">throw</span> <span class="k">new</span> <span class="nf">SQLException</span><span class="o">(</span><span class="s">"The url cannot be null"</span><span class="o">,</span> <span class="s">"08001"</span><span class="o">);</span>
+        <span class="o">}</span>
+
+        <span class="n">println</span><span class="o">(</span><span class="s">"DriverManager.getConnection(\""</span> <span class="o">+</span> <span class="n">url</span> <span class="o">+</span> <span class="s">"\")"</span><span class="o">);</span>
+
+        <span class="c1">// Walk through the loaded registeredDrivers attempting to make a connection.</span>
+        <span class="c1">// Remember the first exception that gets raised so we can reraise it.</span>
+        <span class="nc">SQLException</span> <span class="n">reason</span> <span class="o">=</span> <span class="kc">null</span><span class="o">;</span>
+
+        <span class="k">for</span><span class="o">(</span><span class="nc">DriverInfo</span> <span class="n">aDriver</span> <span class="o">:</span> <span class="n">registeredDrivers</span><span class="o">)</span> <span class="o">{</span>
+            <span class="c1">// If the caller does not have permission to load the driver then</span>
+            <span class="c1">// skip it.</span>
+            <span class="k">if</span><span class="o">(</span><span class="n">isDriverAllowed</span><span class="o">(</span><span class="n">aDriver</span><span class="o">.</span><span class="na">driver</span><span class="o">,</span> <span class="n">callerCL</span><span class="o">))</span> <span class="o">{</span>
+                <span class="k">try</span> <span class="o">{</span>
+                    <span class="n">println</span><span class="o">(</span><span class="s">"    trying "</span> <span class="o">+</span> <span class="n">aDriver</span><span class="o">.</span><span class="na">driver</span><span class="o">.</span><span class="na">getClass</span><span class="o">().</span><span class="na">getName</span><span class="o">());</span>
+                    <span class="nc">Connection</span> <span class="n">con</span> <span class="o">=</span> <span class="n">aDriver</span><span class="o">.</span><span class="na">driver</span><span class="o">.</span><span class="na">connect</span><span class="o">(</span><span class="n">url</span><span class="o">,</span> <span class="n">info</span><span class="o">);</span>
+                    <span class="k">if</span> <span class="o">(</span><span class="n">con</span> <span class="o">!=</span> <span class="kc">null</span><span class="o">)</span> <span class="o">{</span>
+                        <span class="c1">// Success!</span>
+                        <span class="n">println</span><span class="o">(</span><span class="s">"getConnection returning "</span> <span class="o">+</span> <span class="n">aDriver</span><span class="o">.</span><span class="na">driver</span><span class="o">.</span><span class="na">getClass</span><span class="o">().</span><span class="na">getName</span><span class="o">());</span>
+                        <span class="k">return</span> <span class="o">(</span><span class="n">con</span><span class="o">);</span>
+                    <span class="o">}</span>
+                <span class="o">}</span> <span class="k">catch</span> <span class="o">(</span><span class="nc">SQLException</span> <span class="n">ex</span><span class="o">)</span> <span class="o">{</span>
+                    <span class="k">if</span> <span class="o">(</span><span class="n">reason</span> <span class="o">==</span> <span class="kc">null</span><span class="o">)</span> <span class="o">{</span>
+                        <span class="n">reason</span> <span class="o">=</span> <span class="n">ex</span><span class="o">;</span>
+                    <span class="o">}</span>
+                <span class="o">}</span>
+
+            <span class="o">}</span> <span class="k">else</span> <span class="o">{</span>
+                <span class="n">println</span><span class="o">(</span><span class="s">"    skipping: "</span> <span class="o">+</span> <span class="n">aDriver</span><span class="o">.</span><span class="na">getClass</span><span class="o">().</span><span class="na">getName</span><span class="o">());</span>
+            <span class="o">}</span>
+
+        <span class="o">}</span>
+
+        <span class="c1">// if we got here nobody could connect.</span>
+        <span class="k">if</span> <span class="o">(</span><span class="n">reason</span> <span class="o">!=</span> <span class="kc">null</span><span class="o">)</span>    <span class="o">{</span>
+            <span class="n">println</span><span class="o">(</span><span class="s">"getConnection failed: "</span> <span class="o">+</span> <span class="n">reason</span><span class="o">);</span>
+            <span class="k">throw</span> <span class="n">reason</span><span class="o">;</span>
+        <span class="o">}</span>
+
+        <span class="n">println</span><span class="o">(</span><span class="s">"getConnection: no suitable driver found for "</span><span class="o">+</span> <span class="n">url</span><span class="o">);</span>
+        <span class="k">throw</span> <span class="k">new</span> <span class="nf">SQLException</span><span class="o">(</span><span class="s">"No suitable driver found for "</span><span class="o">+</span> <span class="n">url</span><span class="o">,</span> <span class="s">"08001"</span><span class="o">);</span>
+    <span class="o">}</span>
+</code></pre></div></div>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kd">private</span> <span class="kd">static</span> <span class="kt">boolean</span> <span class="nf">isDriverAllowed</span><span class="o">(</span><span class="nc">Driver</span> <span class="n">driver</span><span class="o">,</span> <span class="nc">ClassLoader</span> <span class="n">classLoader</span><span class="o">)</span> <span class="o">{</span>
+        <span class="kt">boolean</span> <span class="n">result</span> <span class="o">=</span> <span class="kc">false</span><span class="o">;</span>
+        <span class="k">if</span><span class="o">(</span><span class="n">driver</span> <span class="o">!=</span> <span class="kc">null</span><span class="o">)</span> <span class="o">{</span>
+            <span class="nc">Class</span><span class="o">&lt;?&gt;</span> <span class="n">aClass</span> <span class="o">=</span> <span class="kc">null</span><span class="o">;</span>
+            <span class="k">try</span> <span class="o">{</span>
+                <span class="n">aClass</span> <span class="o">=</span>  <span class="nc">Class</span><span class="o">.</span><span class="na">forName</span><span class="o">(</span><span class="n">driver</span><span class="o">.</span><span class="na">getClass</span><span class="o">().</span><span class="na">getName</span><span class="o">(),</span> <span class="kc">true</span><span class="o">,</span> <span class="n">classLoader</span><span class="o">);</span>
+            <span class="o">}</span> <span class="k">catch</span> <span class="o">(</span><span class="nc">Exception</span> <span class="n">ex</span><span class="o">)</span> <span class="o">{</span>
+                <span class="n">result</span> <span class="o">=</span> <span class="kc">false</span><span class="o">;</span>
+            <span class="o">}</span>
+
+             <span class="n">result</span> <span class="o">=</span> <span class="o">(</span> <span class="n">aClass</span> <span class="o">==</span> <span class="n">driver</span><span class="o">.</span><span class="na">getClass</span><span class="o">()</span> <span class="o">)</span> <span class="o">?</span> <span class="kc">true</span> <span class="o">:</span> <span class="kc">false</span><span class="o">;</span>
+        <span class="o">}</span>
+
+        <span class="k">return</span> <span class="n">result</span><span class="o">;</span>
+    <span class="o">}</span>
+</code></pre></div></div>
+
+<p><code class="language-plaintext highlighter-rouge">callerCL</code>是调用者的class Loader，如果是null，则是<code class="language-plaintext highlighter-rouge">Thread.currentThread().getContextClassLoader()</code>，显然是<code class="language-plaintext highlighter-rouge">AppClassLoader</code>。</p>
+
+<p>在<code class="language-plaintext highlighter-rouge">isDriverAllowed</code>方法中，使用<code class="language-plaintext highlighter-rouge">callerCl</code>完成了对实际<code class="language-plaintext highlighter-rouge">Driver</code>实现的类加载。</p>
+
+<p>Java 使用这种方式，解决了 Java SPI 与 双亲委派的矛盾。</p>
+
+:ET

@@ -1,0 +1,2 @@
+I"�<p>本文介绍 Dubbo 的加载机制，并与 JDK 加载机制对比。及 @SPI、@Adaptive、@Activite 注解。以及核心类 ExtensionLoader 流程与原理。以及使用的类动态编译实现原理。</p>
+:ET

@@ -1,0 +1,129 @@
+I"�><h2 id="使用场景">使用场景</h2>
+
+<h2 id="什么是-zero-copy">什么是 Zero-Copy</h2>
+
+<p>WIKI定义：</p>
+
+<blockquote>
+  <p>“<strong>Zero-copy</strong>” describes computer operations in which the <a href="https://en.wikipedia.org/wiki/Central_processing_unit">CPU</a> does not perform the task of copying data from one <a href="https://en.wikipedia.org/wiki/RAM">memory</a> area to another. This is frequently used to save CPU cycles and memory bandwidth when transmitting a file over a network.</p>
+</blockquote>
+
+<p>“零拷贝”是指计算机操作的过程中，CPU不需要为数据在内存之间的拷贝消耗资源。通常是指计算机在网络上发送文件时，不需要将文件内容拷贝到用户空间（User Space）而直接在内核空间（Kernel Space）中传输到网络的方式。</p>
+
+<hr />
+
+<p>Zero-Copy 常用于静态资源从磁盘到网络的发送（中间不对资源进行改变），这在web server提供的功能中很常见，一个例子是：保存在磁盘上的一张图片应某个网络请求被从磁盘中取出并通过socket发送至请求方。</p>
+
+<h2 id="-zero-copy-与传统io方式对比">## Zero-Copy 与传统IO方式对比</h2>
+
+<p><img src="/assets/img/3449017dcf54c710ae50bed55007ef5ddfc.jpg" alt="img" /></p>
+
+<p>Zero-Copy 是消除了内核空间到用户空间的复制，并不是完全没有发生copy。并不是所有的操作系统都支持这一特性，并且，如果要对文件进行更改，如加密等，Zero-Copy方式也是做不到的。</p>
+
+<h2 id="java-zero-copy">Java Zero-Copy</h2>
+
+<h3 id="filechanneltransferto">FileChannel.transferTo()</h3>
+
+<p>磁盘上的文件，直接写到一个可写的<code class="language-plaintext highlighter-rouge">SocketChannel</code>，除了内核空间到用户空间的复制。例如：</p>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nc">SocketAddress</span> <span class="n">socketAddress</span> <span class="o">=</span> <span class="k">new</span> <span class="nc">InetSocketAddress</span><span class="o">(</span><span class="no">HOST</span><span class="o">,</span> <span class="no">PORT</span><span class="o">);</span>
+<span class="nc">SocketChannel</span> <span class="n">socketChannel</span> <span class="o">=</span> <span class="nc">SocketChannel</span><span class="o">.</span><span class="na">open</span><span class="o">();</span>
+<span class="n">socketChannel</span><span class="o">.</span><span class="na">connect</span><span class="o">(</span><span class="n">socketAddress</span><span class="o">);</span>
+ 
+<span class="nc">File</span> <span class="n">file</span> <span class="o">=</span> <span class="k">new</span> <span class="nc">File</span><span class="o">(</span><span class="no">FILE_PATH</span><span class="o">);</span>
+<span class="nc">FileChannel</span> <span class="n">fileChannel</span> <span class="o">=</span> <span class="k">new</span> <span class="nc">FileInputStream</span><span class="o">(</span><span class="n">file</span><span class="o">).</span><span class="na">getChannel</span><span class="o">();</span>
+<span class="n">fileChannel</span><span class="o">.</span><span class="na">transferTo</span><span class="o">(</span><span class="mi">0</span><span class="o">,</span> <span class="n">file</span><span class="o">.</span><span class="na">length</span><span class="o">(),</span> <span class="n">socketChannel</span><span class="o">);</span>
+ <span class="c1">//channel write/read....</span>
+<span class="n">fileChannel</span><span class="o">.</span><span class="na">close</span><span class="o">();</span>
+<span class="n">socketChannel</span><span class="o">.</span><span class="na">close</span><span class="o">();</span>
+</code></pre></div></div>
+
+<p>下面使用Java nio写一个例子，Server直接将磁盘上的一个文件通过Zero-Copy方式发往客户端：</p>
+
+<p>Server：</p>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kd">public</span> <span class="kd">class</span> <span class="nc">SelectorServer</span> <span class="o">{</span>
+
+    <span class="kd">private</span> <span class="kd">final</span> <span class="kd">static</span> <span class="kt">int</span> <span class="no">DEFAULT_PORT</span> <span class="o">=</span> <span class="mi">9999</span><span class="o">;</span>
+
+    <span class="kd">public</span> <span class="kd">static</span> <span class="kt">void</span> <span class="nf">main</span><span class="o">(</span><span class="nc">String</span><span class="o">[]</span> <span class="n">args</span><span class="o">)</span> <span class="kd">throws</span> <span class="nc">IOException</span> <span class="o">{</span>
+        <span class="kt">int</span> <span class="n">port</span> <span class="o">=</span> <span class="no">DEFAULT_PORT</span><span class="o">;</span>
+        <span class="k">if</span> <span class="o">(</span><span class="n">args</span><span class="o">.</span><span class="na">length</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="o">)</span> <span class="o">{</span>
+            <span class="n">port</span> <span class="o">=</span> <span class="nc">Integer</span><span class="o">.</span><span class="na">parseInt</span><span class="o">(</span><span class="n">args</span><span class="o">[</span><span class="mi">0</span><span class="o">]);</span>
+        <span class="o">}</span>
+        <span class="nc">System</span><span class="o">.</span><span class="na">out</span><span class="o">.</span><span class="na">println</span><span class="o">(</span><span class="s">"Server starting ... listening on port "</span> <span class="o">+</span> <span class="n">port</span><span class="o">);</span>
+        <span class="nc">ServerSocketChannel</span> <span class="n">ssc</span> <span class="o">=</span> <span class="nc">ServerSocketChannel</span><span class="o">.</span><span class="na">open</span><span class="o">();</span>
+        <span class="n">ssc</span><span class="o">.</span><span class="na">socket</span><span class="o">().</span><span class="na">bind</span><span class="o">(</span><span class="k">new</span> <span class="nc">InetSocketAddress</span><span class="o">(</span><span class="n">port</span><span class="o">));</span>
+        <span class="n">ssc</span><span class="o">.</span><span class="na">configureBlocking</span><span class="o">(</span><span class="kc">false</span><span class="o">);</span>
+
+        <span class="nc">Selector</span> <span class="n">s</span> <span class="o">=</span> <span class="nc">Selector</span><span class="o">.</span><span class="na">open</span><span class="o">();</span>
+        <span class="n">ssc</span><span class="o">.</span><span class="na">register</span><span class="o">(</span><span class="n">s</span><span class="o">,</span> <span class="nc">SelectionKey</span><span class="o">.</span><span class="na">OP_ACCEPT</span><span class="o">);</span>
+
+        <span class="k">for</span> <span class="o">(;;){</span>
+            <span class="kt">int</span> <span class="n">n</span> <span class="o">=</span> <span class="n">s</span><span class="o">.</span><span class="na">select</span><span class="o">();</span>
+            <span class="k">if</span> <span class="o">(</span><span class="n">n</span> <span class="o">==</span> <span class="mi">0</span><span class="o">)</span> <span class="o">{</span>
+                <span class="k">continue</span><span class="o">;</span>
+            <span class="o">}</span>
+            <span class="nc">Iterator</span><span class="o">&lt;</span><span class="nc">SelectionKey</span><span class="o">&gt;</span> <span class="n">iterator</span> <span class="o">=</span> <span class="n">s</span><span class="o">.</span><span class="na">selectedKeys</span><span class="o">().</span><span class="na">iterator</span><span class="o">();</span>
+            <span class="k">while</span> <span class="o">(</span><span class="n">iterator</span><span class="o">.</span><span class="na">hasNext</span><span class="o">())</span> <span class="o">{</span>
+                <span class="nc">SelectionKey</span> <span class="n">key</span> <span class="o">=</span> <span class="n">iterator</span><span class="o">.</span><span class="na">next</span><span class="o">();</span>
+                <span class="k">if</span> <span class="o">(</span><span class="n">key</span><span class="o">.</span><span class="na">isAcceptable</span><span class="o">())</span> <span class="o">{</span>
+                    <span class="nc">SocketChannel</span> <span class="n">sc</span><span class="o">;</span>
+                    <span class="n">sc</span> <span class="o">=</span> <span class="o">((</span><span class="nc">ServerSocketChannel</span><span class="o">)</span> <span class="n">key</span><span class="o">.</span><span class="na">channel</span><span class="o">()).</span><span class="na">accept</span><span class="o">();</span>
+                    <span class="k">if</span> <span class="o">(</span><span class="n">sc</span> <span class="o">==</span> <span class="kc">null</span><span class="o">)</span> <span class="o">{</span>
+                        <span class="k">continue</span><span class="o">;</span>
+                    <span class="o">}</span>
+                    <span class="nc">System</span><span class="o">.</span><span class="na">out</span><span class="o">.</span><span class="na">println</span><span class="o">(</span><span class="s">"Receiving connection"</span><span class="o">);</span>
+                    <span class="nc">File</span> <span class="n">file</span> <span class="o">=</span> <span class="k">new</span> <span class="nc">File</span><span class="o">(</span><span class="s">"./file/1.txt"</span><span class="o">);</span>
+                    <span class="nc">FileChannel</span> <span class="n">fileChannel</span> <span class="o">=</span> <span class="k">new</span> <span class="nc">FileInputStream</span><span class="o">(</span><span class="n">file</span><span class="o">).</span><span class="na">getChannel</span><span class="o">();</span>
+                    <span class="n">fileChannel</span><span class="o">.</span><span class="na">transferTo</span><span class="o">(</span><span class="mi">0</span><span class="o">,</span> <span class="n">file</span><span class="o">.</span><span class="na">length</span><span class="o">(),</span> <span class="n">sc</span><span class="o">);</span>
+                    <span class="n">sc</span><span class="o">.</span><span class="na">close</span><span class="o">();</span>
+                <span class="o">}</span>
+                <span class="n">iterator</span><span class="o">.</span><span class="na">remove</span><span class="o">();</span>
+            <span class="o">}</span>
+        <span class="o">}</span>
+    <span class="o">}</span>
+<span class="o">}</span>
+</code></pre></div></div>
+
+<p>Client：</p>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kd">public</span> <span class="kd">class</span> <span class="nc">SelectorClient</span> <span class="o">{</span>
+
+    <span class="kd">private</span> <span class="kd">final</span> <span class="kd">static</span> <span class="kt">int</span> <span class="no">DEFAULT_PORT</span> <span class="o">=</span> <span class="mi">9999</span><span class="o">;</span>
+    <span class="kd">private</span> <span class="kd">static</span> <span class="nc">ByteBuffer</span> <span class="n">bb</span> <span class="o">=</span> <span class="nc">ByteBuffer</span><span class="o">.</span><span class="na">allocateDirect</span><span class="o">(</span><span class="mi">1024</span><span class="o">);</span>
+
+    <span class="kd">public</span> <span class="kd">static</span> <span class="kt">void</span> <span class="nf">main</span><span class="o">(</span><span class="nc">String</span><span class="o">[]</span> <span class="n">args</span><span class="o">)</span> <span class="o">{</span>
+        <span class="kt">int</span> <span class="n">port</span> <span class="o">=</span> <span class="no">DEFAULT_PORT</span><span class="o">;</span>
+        <span class="k">if</span> <span class="o">(</span><span class="n">args</span><span class="o">.</span><span class="na">length</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="o">)</span> <span class="o">{</span>
+            <span class="n">port</span> <span class="o">=</span> <span class="nc">Integer</span><span class="o">.</span><span class="na">parseInt</span><span class="o">(</span><span class="n">args</span><span class="o">[</span><span class="mi">0</span><span class="o">]);</span>
+        <span class="o">}</span>
+        <span class="k">try</span> <span class="o">{</span>
+            <span class="nc">SocketChannel</span> <span class="n">sc</span> <span class="o">=</span> <span class="nc">SocketChannel</span><span class="o">.</span><span class="na">open</span><span class="o">();</span>
+            <span class="nc">InetSocketAddress</span> <span class="n">addr</span> <span class="o">=</span> <span class="k">new</span> <span class="nc">InetSocketAddress</span><span class="o">(</span><span class="s">"localhost"</span><span class="o">,</span> <span class="n">port</span><span class="o">);</span>
+            <span class="n">sc</span><span class="o">.</span><span class="na">connect</span><span class="o">(</span><span class="n">addr</span><span class="o">);</span>
+
+            <span class="k">while</span> <span class="o">(</span><span class="n">sc</span><span class="o">.</span><span class="na">read</span><span class="o">(</span><span class="n">bb</span><span class="o">)</span> <span class="o">!=</span> <span class="o">-</span><span class="mi">1</span><span class="o">)</span> <span class="o">{</span>
+                <span class="n">bb</span><span class="o">.</span><span class="na">flip</span><span class="o">();</span>
+            <span class="o">}</span>
+            <span class="nc">Charset</span> <span class="n">charset</span> <span class="o">=</span> <span class="nc">StandardCharsets</span><span class="o">.</span><span class="na">UTF_8</span><span class="o">;</span>
+            <span class="nc">System</span><span class="o">.</span><span class="na">out</span><span class="o">.</span><span class="na">println</span><span class="o">(</span><span class="n">charset</span><span class="o">.</span><span class="na">decode</span><span class="o">(</span><span class="n">bb</span><span class="o">).</span><span class="na">toString</span><span class="o">());</span>
+            <span class="n">bb</span><span class="o">.</span><span class="na">clear</span><span class="o">();</span>
+            <span class="n">sc</span><span class="o">.</span><span class="na">close</span><span class="o">();</span>
+        <span class="o">}</span> <span class="k">catch</span> <span class="o">(</span><span class="nc">IOException</span> <span class="n">e</span><span class="o">)</span> <span class="o">{</span>
+            <span class="n">e</span><span class="o">.</span><span class="na">printStackTrace</span><span class="o">();</span>
+        <span class="o">}</span>
+    <span class="o">}</span>
+<span class="o">}</span>
+</code></pre></div></div>
+
+<h2 id="directbuffer">DirectBuffer</h2>
+
+<p><code class="language-plaintext highlighter-rouge">DirectBuffer</code>，堆外内存。在上面的例子中已经用到了，我们把channel的接受读到了一个<code class="language-plaintext highlighter-rouge">DirectBuffer</code>中，使用方式：</p>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nc">ByteBuffer</span> <span class="n">directByteBuffer</span> <span class="o">=</span> <span class="nc">ByteBuffer</span><span class="o">.</span><span class="na">allocateDirect</span><span class="o">(</span><span class="mi">1024</span><span class="o">);</span>
+</code></pre></div></div>
+
+<p>这种方式是直接在堆外分配一个内存，不需要堆内内存和堆外内存数据拷贝的操作。</p>
+
+:ET

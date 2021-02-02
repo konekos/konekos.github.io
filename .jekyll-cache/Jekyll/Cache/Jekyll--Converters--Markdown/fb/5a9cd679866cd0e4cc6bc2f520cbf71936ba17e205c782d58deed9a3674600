@@ -1,0 +1,2 @@
+I"�<p>AQS 是并发包的基石。AQS 是一个抽象类，必须要继承才能使用。<code class="language-plaintext highlighter-rouge">ReentrantLock</code>、<code class="language-plaintext highlighter-rouge">ReentrantReadWriteLock</code>，<code class="language-plaintext highlighter-rouge">Semaphore</code>这些并发工具都是依赖 AQS 实现（内部类继承 AQS ）的。</p>
+:ET

@@ -1,0 +1,317 @@
+I"W*<h1 id="一-数据结构与对象">一、 数据结构与对象</h1>
+
+<p>总结：</p>
+
+<ul>
+  <li>Redis 数据库中每个键值对的键和值都是一个对象</li>
+  <li>String，List，Hash，Set，Sorted Set 5种类型的对象，每种对象有至少2种的编码方式。</li>
+  <li>服务器执行命令前，先check键能否执行指定的命令，通过检查键对象的类型。</li>
+  <li>Redis 对象系统带有引用计数实现的内存回收机制，一个对象不再被使用时，释放对象占用的内存。</li>
+  <li>Redis 共享值为 0-9999 的字符串对象。</li>
+  <li>对象会记录自己最后一次被访问的时间，用于计算对象的空转时间。</li>
+</ul>
+
+<h1 id="二单机数据库的实现">二、单机数据库的实现</h1>
+
+<h2 id="第9章-数据库">第9章 数据库</h2>
+
+<p>0-15 总16个DB。切换数据库，客户端通过 SELECT 命令切换。</p>
+
+<p><strong>键空间</strong>：数据库的所有键值对。</p>
+
+<ul>
+  <li>键空间的键是数据库的键，是字符串对象。</li>
+  <li>键空间的值是数据库的值，任意 Redis 对象。</li>
+</ul>
+
+<p>键：添加、删除、更新、取值、其他键空间的操作（FLUSHDB、RANDONKEY、DBSIZE、EXISTS、RENAME、KEYS等）</p>
+
+<p><strong>设置键的过期时间</strong>：EXPIRE。SETEX（仅字符串），移除过期时间 PRESIST、返回剩余时间 TTL。</p>
+
+<p><strong>过期键的删除策略</strong>：</p>
+
+<ul>
+  <li>定时删除	创建key的同时创建一个 Timer，对内存友好，对CPU不友好</li>
+  <li>惰性删除     获取时检查是否过期。对CPU友好，对内存不友好。</li>
+  <li>定期删除    每隔一段时间检查数据库，删除过期键。删除多少，检查多少数据库由算法决定。</li>
+</ul>
+
+<p><strong>Redis 的过期键删除策略</strong>
+使用的惰性删除和定期删除两种策略。</p>
+
+<p><strong>RDB和AOF和复制功能对过期键的处理</strong></p>
+
+<ul>
+  <li>RDB
+    <ul>
+      <li>生成RDB： 过期键不会存入RDB文件。</li>
+      <li>载入RDB： Master服务器，删除过期键。Slave服务器，都会载入。</li>
+    </ul>
+  </li>
+  <li>AOF
+    <ul>
+      <li>写入AOF： 如果已过期，还没被惰性删除或者定期删除，没有影响一样写入。被惰性删除或定期删除时，向 AOF 文件追加 DEL 指令。</li>
+      <li>AOF 重写：类似RDB生成，过期的key不会存入。</li>
+    </ul>
+  </li>
+  <li>复制：由Master控制。
+    <ul>
+      <li>删除过期键时，向Slave发送DEL指令。</li>
+      <li>Slave执行读时，遇到过期key不会做删除操作。</li>
+      <li>Slave只会接收Master的DEL指令才会删除key。</li>
+    </ul>
+  </li>
+</ul>
+
+<h2 id="第10章-rdb持久化">第10章 RDB持久化</h2>
+
+<p><strong>创建和载入：</strong></p>
+
+<ul>
+  <li>
+    <p>生成RDB文件。SAVE（阻塞）、BGSAVE（子进程、非阻塞）命令。</p>
+  </li>
+  <li>
+    <p>载入RDB，在服务器启动时自动检测RDB文件，有的话阻塞直到写完。</p>
+  </li>
+</ul>
+
+<p><strong>自动间隔保存：</strong></p>
+
+<p>默认save条件：</p>
+
+<p>save 900 1</p>
+
+<p>save 300 10</p>
+
+<p>save 60 10000</p>
+
+<p>满足3个条件之一就会触发BGSAVE。</p>
+
+<p>不同类型的键值对：RDB文件用不同的方式保存。</p>
+
+<p>RDB 文件检查工具 ：redis-check-dump。</p>
+
+<h2 id="第11章-aof持久化">第11章 AOF持久化</h2>
+
+<p>Append Only File 持久化。保存Redis服务器执行的写命令记录数据库状态。以Redis命令请求协议的格式保存。</p>
+
+<p><strong>实现：</strong></p>
+
+<ul>
+  <li>命令追加（append）：</li>
+  <li>文件写入，先写入缓冲区，再落盘。
+    <ul>
+      <li>appendfsync 值为always，写入文件</li>
+      <li>everysecond  每隔一秒对子线程的aof文件进行同步。</li>
+      <li>no 由操作系统完成缓冲区刷新到磁盘的操作。</li>
+    </ul>
+  </li>
+  <li>文件同步（sync）</li>
+</ul>
+
+<p><strong>载入与还原</strong></p>
+
+<p><strong>AOF重写</strong></p>
+
+<p>AOF 文件体积会越来越大。提供了rewrite的功能。创建一个新的AOF文件代替当前的AOF文件。</p>
+
+<ul>
+  <li>重写的实现：不会对当前AOF文件读取分析和写入，通过读取当前数据库状态实现。</li>
+  <li>AOF 后台重写。 aof_rewrite会造成阻塞。BGREWRITEAOF命令。 会先创建一个缓冲区，保存新的指令，然后追加到新的AOF文件，使一致。</li>
+</ul>
+
+<h2 id="第12章-事件">第12章 事件</h2>
+
+<ul>
+  <li>Redis服务器是事件驱动程序，包括文件时间和时间事件。</li>
+  <li>文件事件处理器是基于 Reactor 模式实现的网络通信程序。</li>
+  <li>文件事件是对套接字操作的抽象：每次套接字变为可应答（acceptable），可写入（writable）或者可读（readable）时，就产生相应的文件事件。</li>
+  <li>文件事件包括 AE_READABLE 事件（读事件）和 AE_WRITABLE （写事件）两类。</li>
+</ul>
+
+<h2 id="第13章-客户端">第13章 客户端</h2>
+
+<p>Redis 服务器以单线程单进程方式处理命令请求，与多个客户端通信。</p>
+
+<p>Redis 服务器会保存客户端的信息。</p>
+
+<p><strong>客户端属性：</strong></p>
+
+<ul>
+  <li>套接字描述符</li>
+  <li>name</li>
+  <li>标志</li>
+  <li>标志</li>
+  <li>输入缓冲区</li>
+  <li>命名和命令参数</li>
+  <li>命令实现函数</li>
+  <li>输出缓冲区</li>
+  <li>身份验证</li>
+  <li>时间</li>
+</ul>
+
+<p><strong>客户端的创建与关闭</strong></p>
+
+<p>略</p>
+
+<h2 id="第14章-服务器">第14章 服务器</h2>
+
+<p><strong>命令的执行过程</strong></p>
+
+<ul>
+  <li>客户端发送命令</li>
+  <li>server读取命令</li>
+  <li>命令执行器：
+    <ul>
+      <li>查找命令实现</li>
+      <li>执行预备操作</li>
+      <li>调用命令实现函数</li>
+      <li>执行后续工作</li>
+    </ul>
+  </li>
+  <li>回复客户端</li>
+</ul>
+
+<p><strong>serverCron 函数</strong></p>
+
+<ul>
+  <li>更新服务器时间缓存</li>
+  <li>更新LRU时钟</li>
+  <li>更新服务器每秒执行命令次数</li>
+  <li>更新服务器内存峰值记录</li>
+  <li>处理 SIGTERM信号。</li>
+  <li>管理客户端资源</li>
+  <li>管理数据库资源</li>
+  <li>执行被延迟的BGREWRITEAOF</li>
+  <li>检查持久化操作运行状态。</li>
+  <li>将AOF缓冲区的内容写入AOF。</li>
+  <li>关闭异步客户端</li>
+  <li>增加 cronloops 计数器的值</li>
+</ul>
+
+<p><strong>初始化服务器</strong></p>
+
+<ul>
+  <li>初始化服务器的结构状态</li>
+  <li>载入配置选项</li>
+  <li>初始化服务器数据结构</li>
+  <li>还原数据库状态</li>
+  <li>执行事件循环</li>
+</ul>
+
+<h1 id="三多机数据库的实现">三、多机数据库的实现</h1>
+
+<h2 id="第15章-复制">第15章 复制</h2>
+
+<p>SLAVEOF命令或配置，复制另一台服务器（Master）。</p>
+
+<p><strong>旧版复制的实现</strong></p>
+
+<ul>
+  <li>同步：向master发送SYNC指令</li>
+  <li>命令传播：</li>
+</ul>
+
+<p>缺陷：初次复制和断线后重复制。旧版断线后重复制效率低。</p>
+
+<p><strong>新版复制</strong></p>
+
+<p>从Redis 2.8开始，使用PSYNC代替SYNC执行复制的同步操作。解决了断线后重复制效率低的问题。</p>
+
+<p><strong>复制的实现</strong></p>
+
+<p>略</p>
+
+<p><strong>心跳检测</strong>
+REPLCONF ACK命令心跳。</p>
+
+<p>配置项 ：min-slaves-to-write 和 min-slaves-max-lag  。 都不满足时拒绝写入。</p>
+
+<h2 id="第16章-sentinel">第16章 Sentinel</h2>
+
+<p><strong>启动和初始化Sentinel</strong></p>
+
+<ul>
+  <li>初始化：Sentinel 本质是运行在特殊模式下的 Redis服务器。</li>
+  <li>使用 Sentinel 专用代码</li>
+  <li>初始化 Sentinel 状态</li>
+  <li>初始化Sentinel 状态的 masters 属性</li>
+  <li>创建连向主服务器的网络连接</li>
+</ul>
+
+<p><strong>获取主服务器信息</strong>
+Sentinel 默认每 10s 向被监视的master发送 INFO 命令。</p>
+
+<p><strong>获取从服务器信息</strong>
+ Sentinel 发现master有新的salve时，</p>
+
+<p><strong>向主服务器和从服务器发送信息</strong>
+默认情况下 2s 一次向master和Slave发送信息。</p>
+
+<p><strong>接受来自主服务器和从服务器的频道信息</strong>
+略</p>
+
+<p><strong>检测主观下线状态</strong>
+默认下，Sentinel 1s 一次的频率向所有master，slave 和 其他的 Sentinel 发送PING 命令，判断是否在线。</p>
+
+<p><strong>检查客观下线状态</strong>
+Sentinel 将一个 master 判断为主观下线后，为了确认 master 是否真的挂掉了， 会向监视这个master的其他Sentinel 进行询问。</p>
+
+<ul>
+  <li>发送 Sentinel is-master-down-by-addr 命令</li>
+  <li>接收 Sentinel is-master-down-by-addr 命令  其他的Sentinel接收命令，根据命令的master信息，检查master是否下线。然后返回回复。</li>
+  <li>接收 Sentinel 的回复。</li>
+</ul>
+
+<p><em>当 认为master下线的Sentinel 超过了Sentinel配的quorum的值，就认为master挂了。</em></p>
+
+<p><em>不同的Sentinel 判断客观下线的条件可能不同</em></p>
+
+<p><strong>选举 Leader 的 Sentinel</strong>
+当 master 被认为下线。Sentinel 集群会选举一个 leader Sentinel，由leader 对挂掉的master进行故障转移。</p>
+
+<p><strong>故障转移</strong>
+选出的Sentinel 的Leader会进行故障转移操作：</p>
+
+<ul>
+  <li>在所有slave节点中，挑出一个转换为master
+    <ul>
+      <li>选择一个状态好，数据完整的slave，向这个slave发出 SLAVEOF no one 命令，转为Master</li>
+    </ul>
+  </li>
+  <li>让所有slave 复制新的master
+    <ul>
+      <li>向slave 发送 SLAVEOF 命令实现</li>
+    </ul>
+  </li>
+  <li>将挂掉的master 设置为 新master的slave，等旧master上线的时候，会成为新的master的slave。
+    <ul>
+      <li>当旧master 重新上线，Sentinel 向它发出 SLAVEOF 命令，复制新的master。</li>
+    </ul>
+  </li>
+</ul>
+
+<h2 id="第17章-集群redis-cluster">第17章 集群（redis-cluster)</h2>
+
+<h4 id="节点">节点</h4>
+
+<h4 id="槽指派">槽指派</h4>
+
+<p>集群整个数据库被分为 16384个槽，每个key 都在其中一个槽。分配槽。</p>
+
+<p>计算key属于哪个槽，slot_number(key): return CRC16(key) &amp; 16383
+使用 CLUSTER KEYSLOT  key命令 查看属于哪个槽。</p>
+
+<p><strong>重新分片</strong>
+将已经分配给某个节点的槽改为分配给另外一个节点。 重分片时，集群不需要下线。</p>
+
+<p><strong>ASK错误和MOVED错误</strong></p>
+
+<p>m代表负责权已转移</p>
+
+<p>a只是迁移中的一种临时措施</p>
+
+<h4 id="复制与故障转移">复制与故障转移</h4>
+
+:ET

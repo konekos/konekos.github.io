@@ -1,0 +1,825 @@
+I"H�<p>本文介绍 Dubbo 的加载机制，并与 JDK 加载机制对比。及 @SPI、@Adaptive、@Activite 注解。以及核心类 ExtensionLoader 流程与原理。以及使用的类动态编译实现原理。</p>
+
+<p>本文抄自《深入理解 Apache Dubbo 和实战》。但相关代码部分会更详细，读者也可以自行 fork 源码阅读。本文 Dubbo 源码版本为 2.7.5，个别地方会和原版书中描述有出入。</p>
+
+<h1 id="一加载机制概述">一、加载机制概述</h1>
+
+<p>Dubbo 良好的扩展性是基于 Dubbo SPI 加载机制以及使用合适的设计模式，实现了框架的接口与实现完全的解耦。</p>
+
+<p>Dubbo 默认提供了很多可以直接使用的扩展点。Dubbo 几乎所有功能组件都是基于 SPI 实现的，后续文章会详细介绍。</p>
+
+<p>Dubbo SPI 没有直接使用 Java SPI，而是做了一定改进，并且兼容 Java SPI。服务启动时，Dubbo 就会查找这些扩展点的具体实现。Dubbo 启停原理会在后续文章讲解。</p>
+
+<h2 id="11-java-spi">1.1 Java SPI</h2>
+
+<p>Java SPI，即 Service Provider Interface，起初用于给厂商做插件开发。</p>
+
+<p>Java SPI 是策略模式，一种接口多种实现。Java 只制定接口（规范），具体实现不在程序中直接确定，而取决于是由程序之外的配置，用来实现具体的装配。例如：</p>
+
+<ol>
+  <li>定义一个接口，如 com.test.spi.PrintService</li>
+  <li>编写一个接口的实现类</li>
+  <li>在 META-INF/services/目录下，创建一个以接口全路径名的文件 com.test.spi.PrintService</li>
+  <li>文件内容为其实现类的全路径名，如有多个使用分隔符分隔</li>
+  <li>代码中使用 java.util.ServiceLoader 加载具体实现类。</li>
+</ol>
+
+<p>这样便实现了通过配置文件控制接口的具体实现类。</p>
+
+<p>代码示例：</p>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kd">public</span> <span class="kd">interface</span> <span class="nc">PrintService</span> <span class="o">{</span>
+    <span class="kt">void</span> <span class="nf">print</span><span class="o">(</span><span class="nc">String</span> <span class="n">s</span><span class="o">);</span>
+<span class="o">}</span>
+
+<span class="kd">public</span> <span class="kd">class</span> <span class="nc">IPrintService</span> <span class="kd">implements</span> <span class="nc">PrintService</span> <span class="o">{</span>
+
+    <span class="nd">@Override</span>
+    <span class="kd">public</span> <span class="kt">void</span> <span class="nf">print</span><span class="o">(</span><span class="nc">String</span> <span class="n">s</span><span class="o">)</span> <span class="o">{</span>
+        <span class="nc">System</span><span class="o">.</span><span class="na">out</span><span class="o">.</span><span class="na">println</span><span class="o">(</span><span class="n">s</span><span class="o">);</span>
+    <span class="o">}</span>
+<span class="o">}</span>
+
+<span class="c1">// 在 META-INF/services/ 目录下创建文件，文件名为接口的全路径名，如 com.test.spi.PrintService</span>
+<span class="c1">// 文件的内容为实现类的全路径名</span>
+<span class="kd">public</span> <span class="kd">class</span> <span class="nc">JDKSPIDemo</span> <span class="o">{</span>
+    <span class="kd">public</span> <span class="kd">static</span> <span class="kt">void</span> <span class="nf">main</span><span class="o">(</span><span class="nc">String</span><span class="o">[]</span> <span class="n">args</span><span class="o">)</span> <span class="o">{</span>
+        <span class="nc">ServiceLoader</span><span class="o">&lt;</span><span class="nc">PrintService</span><span class="o">&gt;</span> <span class="n">serviceLoader</span> <span class="o">=</span> <span class="nc">ServiceLoader</span><span class="o">.</span><span class="na">load</span><span class="o">(</span><span class="nc">PrintService</span><span class="o">.</span><span class="na">class</span><span class="o">);</span>
+        <span class="k">for</span> <span class="o">(</span><span class="nc">PrintService</span> <span class="n">printService</span> <span class="o">:</span> <span class="n">serviceLoader</span><span class="o">)</span> <span class="o">{</span>
+            <span class="n">printService</span><span class="o">.</span><span class="na">print</span><span class="o">(</span><span class="s">"I print"</span><span class="o">);</span>
+        <span class="o">}</span>
+    <span class="o">}</span>
+<span class="o">}</span>
+</code></pre></div></div>
+
+<p>因为我们只配置了一个实现类，所以会打印一次 “I print”</p>
+
+<h2 id="12-扩展点加载机制的改进">1.2 扩展点加载机制的改进</h2>
+
+<p>Dubbo SPI 做了一定的改进和优化，官方文档内容：</p>
+
+<blockquote>
+  <ol>
+    <li>
+      <p>JDK 标准 SPI 会一次性加载所有实现，如果有些实现加载很耗时而且也没用上，则浪费资源。</p>
+    </li>
+    <li>如果扩展点加载失败，连扩展点的名称都拿不到了。比如：JDK标准的ScriptEngine，通过getName();获取脚本类型的名称， 但如果RubyScriptEngine因为所依赖的jruby.jar不存在，导致RubyScriptEngine类加载失败，这个失败原因被吃掉 了，和ruby对应不起来，当用户执行ruby脚本时，会报不支持ruby，而不是真正失败的原因。</li>
+    <li>增加了对扩展点IoC和AOP的支持，一个扩展点可以直接setter注入其它扩展点。Java SPI 的 ServiceLoader 会把接口的所有实现类全部初始化，用户可以直接使用。Dubbo 的 SPI 只是记载了配置文件里的类，并且分成不同类型缓存在内存中，并且不会立刻初始化，性能上有更好的表现。</li>
+  </ol>
+</blockquote>
+
+<p>将上面的例子改为 Dubbo SPI</p>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">// 接口加上 @SPI 注解，实现类不变</span>
+<span class="nd">@SPI</span><span class="o">(</span><span class="s">"impl"</span><span class="o">)</span>
+<span class="kd">public</span> <span class="kd">interface</span> <span class="nc">PrintService</span> <span class="o">{</span>
+    <span class="kt">void</span> <span class="nf">print</span><span class="o">(</span><span class="nc">String</span> <span class="n">s</span><span class="o">);</span>
+<span class="o">}</span>
+
+<span class="c1">// 在 META-INF.dubbo.internal 下创建同名文件 文件内容为 </span>
+<span class="c1">// 文件内容为 impl=com.test.spi.IPrintService  impl SPI 注解上的值，代表默认的实现</span>
+
+<span class="kd">public</span> <span class="kd">class</span> <span class="nc">DubboSPIDemo</span> <span class="o">{</span>
+    <span class="kd">public</span> <span class="kd">static</span> <span class="kt">void</span> <span class="nf">main</span><span class="o">(</span><span class="nc">String</span><span class="o">[]</span> <span class="n">args</span><span class="o">)</span> <span class="o">{</span>
+        <span class="nc">PrintService</span> <span class="n">printService</span> <span class="o">=</span> <span class="nc">ExtensionLoader</span><span class="o">.</span><span class="na">getExtensionLoader</span><span class="o">(</span><span class="nc">PrintService</span><span class="o">.</span><span class="na">class</span><span class="o">).</span><span class="na">getDefaultExtension</span><span class="o">();</span>
+        <span class="n">printService</span><span class="o">.</span><span class="na">print</span><span class="o">(</span><span class="s">"I print."</span><span class="o">);</span>
+    <span class="o">}</span>
+<span class="o">}</span>
+</code></pre></div></div>
+
+<p>Java SPI 加载失败，可能会因为各种原因导致异常信息被“吞掉”，导致追踪问题困难。Dubbo SPI 加载失败时，会先抛出真实异常并打印日志。</p>
+
+<p>Dubbo SPI 自己实现了 IoC 和 Aop 机制。一个扩展点可以通过 setter 直接注入其他扩展的方法，T injectExtension(T instance) 方法实现了这个功能。</p>
+
+<p>另外，Dubbo 支持包装扩展类，推荐把通用的抽象逻辑放到包装类中，用于实现扩展点的 AOP 特性。例如，类 ProtocolFilterWrapper 包装类扩展了 Protocol，  通用的逻辑判断全部放在了 export 方法，最终调用 Protocal 的 export 方法。和 Spring 动态代理的思想是一样的，在被代理类的前后插入自己的逻辑增强，最终调用被代理类。(可以自行结合代码查看)。</p>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kd">public</span> <span class="kd">class</span> <span class="nc">ProtocolFilterWrapper</span> <span class="kd">implements</span> <span class="nc">Protocol</span> <span class="o">{</span>
+    <span class="kd">private</span> <span class="kd">final</span> <span class="nc">Protocol</span> <span class="n">protocol</span><span class="o">;</span>
+    <span class="o">...</span>
+    <span class="kd">public</span> <span class="o">&lt;</span><span class="no">T</span><span class="o">&gt;</span> <span class="nc">Exporter</span><span class="o">&lt;</span><span class="no">T</span><span class="o">&gt;</span> <span class="nf">export</span><span class="o">(</span><span class="nc">Invoker</span><span class="o">&lt;</span><span class="no">T</span><span class="o">&gt;</span> <span class="n">invoker</span><span class="o">)</span> <span class="kd">throws</span> <span class="nc">RpcException</span> <span class="o">{</span>
+            <span class="k">if</span> <span class="o">(</span><span class="nc">UrlUtils</span><span class="o">.</span><span class="na">isRegistry</span><span class="o">(</span><span class="n">invoker</span><span class="o">.</span><span class="na">getUrl</span><span class="o">()))</span> <span class="o">{</span>
+                <span class="k">return</span> <span class="n">protocol</span><span class="o">.</span><span class="na">export</span><span class="o">(</span><span class="n">invoker</span><span class="o">);</span>
+            <span class="o">}</span>
+            <span class="k">return</span> <span class="n">protocol</span><span class="o">.</span><span class="na">export</span><span class="o">(</span><span class="n">buildInvokerChain</span><span class="o">(</span><span class="n">invoker</span><span class="o">,</span> <span class="no">SERVICE_FILTER_KEY</span><span class="o">,</span> 		<span class="nc">CommonConstants</span><span class="o">.</span><span class="na">PROVIDER</span><span class="o">));</span>
+        <span class="o">}</span>
+    <span class="o">...</span>
+<span class="o">}</span>
+</code></pre></div></div>
+
+<h2 id="13-扩展点规范配置">1.3 扩展点规范配置</h2>
+
+<table>
+  <thead>
+    <tr>
+      <th>规范名</th>
+      <th>规范说明</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>SPI 配置文件路径</td>
+      <td>META-INF/services/ （兼容JDK）、META-INF/dubbo/、META-INF/dubbo/internal</td>
+    </tr>
+    <tr>
+      <td>SPI 配置文件名称</td>
+      <td>类全路径名</td>
+    </tr>
+    <tr>
+      <td>文件内容格式</td>
+      <td>key=value 方式，多个用换行符分隔，key 会用作 @SPI 注解上的 value</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2 id="14-扩展点的分类和缓存">1.4 扩展点的分类和缓存</h2>
+
+<p>Dubbo SPI 可以分为 Class 缓存、实例缓存。这两种缓存又能根据扩展类的种类分为普通扩展类、包装扩展类（Wrapper 类）、自适应扩展类（Adaptive）等。</p>
+
+<ul>
+  <li>Class 缓存：Dubbo SPI 获取扩展类时，先会从缓存中读取。如果缓存中不存在，则加载配置文件，根据配置把 Class 缓存到内存，不会直接全部初始化。</li>
+  <li>实例缓存：基于性能考虑，Dubbo 框架不仅缓存 Class，也会缓存 Class 实例化后的对象。每次获取的时候，线程缓存获取，缓存读不到，重新加载并写入缓存。这也是为什么 Dubbo SPI 比 Java SPI 性能好的原因，Dubbo 是按需实例化且做了缓存。</li>
+</ul>
+
+<p>被缓存的 Class 和对象实例可以根据不同特性分为不同类别：</p>
+
+<ol>
+  <li>普通扩展类。最基础的，SPI 配置文件中的。</li>
+  <li>包装扩展类。这种 Wrapper 类没有具体的实现，只是做了通用逻辑的抽象，需要在构造方法中传入一个具体的扩展接口的实现。属于 Dubbo 的自动包装特性。</li>
+  <li>自适应扩展类。一个扩展接口会有多个实现类，具体用哪个可以不写死在代码或者配置里，可以通过传入 URL   中的某些参数动态来确定。属于扩展点的自适应特性，@Adaptive 注解。</li>
+  <li>其他缓存，如扩展类加载器缓存、扩展名缓存等。</li>
+</ol>
+
+<p>扩展类缓存表：见下文 ExtensionLoader 源码。</p>
+
+<h2 id="15-扩展点特性">1.5 扩展点特性</h2>
+
+<p>从官方文档得知，扩展类一共包含四种特性：自动包装、自动加载、自适应和自动激活。</p>
+
+<h3 id="151-自动包装"><strong>1.5.1 自动包装</strong></h3>
+
+<p>自动包装是 1.4 中提到的一种被缓存的扩展类，ExtensionLoader 在加载扩展时，如果发现这个扩展类包含其他其他扩展点作为构造参数的参数，则这个扩展类就会被认为是 Wrapper 类，如：</p>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kd">public</span> <span class="kd">class</span> <span class="nc">ProtocolFilterWrapper</span> <span class="kd">implements</span> <span class="nc">Protocol</span> <span class="o">{</span>
+
+    <span class="kd">private</span> <span class="kd">final</span> <span class="nc">Protocol</span> <span class="n">protocol</span><span class="o">;</span>
+	
+    <span class="c1">// 实现了 Protocol，构造函数中又传入了一个 Protocol 类型的参数，框架会自动注入</span>
+    <span class="kd">public</span> <span class="nf">ProtocolFilterWrapper</span><span class="o">(</span><span class="nc">Protocol</span> <span class="n">protocol</span><span class="o">)</span> <span class="o">{</span>
+        <span class="k">if</span> <span class="o">(</span><span class="n">protocol</span> <span class="o">==</span> <span class="kc">null</span><span class="o">)</span> <span class="o">{</span>
+            <span class="k">throw</span> <span class="k">new</span> <span class="nf">IllegalArgumentException</span><span class="o">(</span><span class="s">"protocol == null"</span><span class="o">);</span>
+        <span class="o">}</span>
+        <span class="k">this</span><span class="o">.</span><span class="na">protocol</span> <span class="o">=</span> <span class="n">protocol</span><span class="o">;</span>
+    <span class="o">}</span>
+	<span class="o">...</span>
+<span class="o">}</span>
+</code></pre></div></div>
+
+<p>ProtocolFilterWrapper 虽然实现了 Protocol 接口，但构造函数又注入了一个 Protocol 类型的参数。这样 ProtocolFilterWrapper 会被认定为 Wrapper 类。是一种装饰器模式，把通用的抽象逻辑进行封装或对子类进行增强，让子类可以更加专注具体的实现。</p>
+
+<h3 id="152-自动加载">1.5.2 自动加载</h3>
+
+<p>除了在构造函数中传入其他扩展实例，我们还经常使用 setter 方法设置属性值。如果某个扩展类是另外一个扩展点的成员属性，并拥有 setter 方法，框架会自动注入对应的扩展点实例。ExtensionLoader 在执行扩展点初始化的时候，会自动通过 setter 方法注入对应的实现类。这里存在一个问题，如果扩展类属性是一个接口，它有多种实现，那么具体注入哪个呢？这涉及第三个特性——自适应。</p>
+
+<h3 id="153-自适应">1.5.3 自适应</h3>
+
+<p>Dubbo SPI 中，我们使用 @Adaptive 注解，可以动态地通过 URL 中的参数来确定要使用哪个具体的实现类。从而解决自动加载中的实例注入问题。例如：</p>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nd">@SPI</span><span class="o">(</span><span class="s">"netty"</span><span class="o">)</span>
+<span class="kd">public</span> <span class="kd">interface</span> <span class="nc">Transporter</span> <span class="o">{</span>
+
+    <span class="nd">@Adaptive</span><span class="o">({</span><span class="nc">Constants</span><span class="o">.</span><span class="na">SERVER_KEY</span><span class="o">,</span> <span class="nc">Constants</span><span class="o">.</span><span class="na">TRANSPORTER_KEY</span><span class="o">})</span>
+    <span class="nc">RemotingServer</span> <span class="nf">bind</span><span class="o">(</span><span class="no">URL</span> <span class="n">url</span><span class="o">,</span> <span class="nc">ChannelHandler</span> <span class="n">handler</span><span class="o">)</span> <span class="kd">throws</span> <span class="nc">RemotingException</span><span class="o">;</span>
+
+    <span class="nd">@Adaptive</span><span class="o">({</span><span class="nc">Constants</span><span class="o">.</span><span class="na">CLIENT_KEY</span><span class="o">,</span> <span class="nc">Constants</span><span class="o">.</span><span class="na">TRANSPORTER_KEY</span><span class="o">})</span>
+    <span class="nc">Client</span> <span class="nf">connect</span><span class="o">(</span><span class="no">URL</span> <span class="n">url</span><span class="o">,</span> <span class="nc">ChannelHandler</span> <span class="n">handler</span><span class="o">)</span> <span class="kd">throws</span> <span class="nc">RemotingException</span><span class="o">;</span>
+
+<span class="o">}</span>
+</code></pre></div></div>
+
+<p>@Adaptive 的两个参数，值分别是 server 和 transporter。外部调用 bind 时，会动态地从 URL 中提取 server 作为 key 的 value 值，如果能匹配上陌路哥扩展实现类时则直接使用对应实现类；如果匹配不上，继续通过第二个参数 transporter 提取 value。如果都没匹配到，则抛出异常。</p>
+
+<p>也就是说，@Adaptive 如果传入多个参数，则依次进行实现类匹配，到最后没有则抛出异常。</p>
+
+<p>这种动态寻找实现类的方式比较灵活，但只能激活一个具体的实现类，如果需要多个实现类被同时激活，如 Filter 可以同时有多个过滤器；或者根据不同的条件，同时激活多个实现类，这就需要第四个特性——自动激活。</p>
+
+<h3 id="154-自动激活">1.5.4 自动激活</h3>
+
+<p>使用 @Activate 注解，可以标记对应的扩展点默认被激活启用。该注解还可以传入不同的参数，设置扩展点在不同的条件下被自动激活。主要的使用场景是某个扩展点的多个实现类需要同时启用（比如 Filter 扩展点）。</p>
+
+<h1 id="二扩展点注解">二、扩展点注解</h1>
+
+<h2 id="21-扩展点注解spi">2.1 扩展点注解：@SPI</h2>
+
+<p>可用在类、接口和枚举类上，Dubbo 框架中都是在接口上用。作用是标记这个接口是一个 Dubbo SPI 接口，是一个扩展点，可以有多个不同的内置或用户定义的实现。运行时需要通过配置找到具体的实现类。</p>
+
+<p>源码：</p>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nd">@Documented</span>
+<span class="nd">@Retention</span><span class="o">(</span><span class="nc">RetentionPolicy</span><span class="o">.</span><span class="na">RUNTIME</span><span class="o">)</span>
+<span class="nd">@Target</span><span class="o">({</span><span class="nc">ElementType</span><span class="o">.</span><span class="na">TYPE</span><span class="o">})</span>
+<span class="kd">public</span> <span class="nd">@interface</span> <span class="no">SPI</span> <span class="o">{</span>
+
+    <span class="cm">/**
+     * default extension name
+     */</span>
+    <span class="nc">String</span> <span class="nf">value</span><span class="o">()</span> <span class="k">default</span> <span class="s">""</span><span class="o">;</span>
+
+<span class="o">}</span>
+</code></pre></div></div>
+
+<p>SPI 注解的 value 属性可以设置默认实现类。例如，Transporter 使用 netty 作为默认实现。</p>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nd">@SPI</span><span class="o">(</span><span class="s">"netty"</span><span class="o">)</span>
+<span class="kd">public</span> <span class="kd">interface</span> <span class="nc">Transporter</span> <span class="o">{</span>
+<span class="o">...</span>
+<span class="o">}</span>
+</code></pre></div></div>
+
+<p>Dubbo 中有很多地方通过 <code class="language-plaintext highlighter-rouge">getExtension(Class&lt;T&gt; type, String name)</code>来获取扩展点接口的具体实现，此时会对传入的 Class 做校验，判断是否是接口，以及是否有 @SPI 注解，两者缺一不可。</p>
+
+<h2 id="22-扩展点自适应注解adaptive">2.2 扩展点自适应注解：@Adaptive</h2>
+
+<p>@Adaptive 可以标记在类、接口、枚举类和方法上，整个 Dubbo 框架中，只有几个地方在类级别上，如 AdaptiveExtensionFactory 和 AdaptiveCompiler，其余都在方法上。如果标记在方法上，即方法级别的注解，则可以通过参数动态获得实现类。方法级别的注解在第一次 getExtension 时，会自动生成和编译一个动态的 Adaptive 类，从而达到动态实现类的效果。</p>
+
+<p>例如，Transporter 接口 bind 和 connect 方法都有 @Adaptive 注解（see 1.5.3）。Dubbo 在初始化扩展点时，会生成一个 Transporter$Adaptive类，里面会实现这两个方法，方法中会有一些抽象的通用逻辑，通过 @Adaptive 中传入的参数，找到并调用真正的实现类。熟悉装饰器模式的读者会很容易理解这部分的逻辑。原理在第四部分讲解。</p>
+
+<p>下面是自动生成的 Transporter$Adaptive#bind 实现代码</p>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kd">public</span> <span class="n">org</span><span class="o">.</span><span class="na">apache</span><span class="o">.</span><span class="na">dubbo</span><span class="o">.</span><span class="na">remoting</span><span class="o">.</span><span class="na">Server</span> <span class="nf">bind</span><span class="o">(</span><span class="n">org</span><span class="o">.</span><span class="na">apache</span><span class="o">.</span><span class="na">dubbo</span><span class="o">.</span><span class="na">common</span><span class="o">.</span><span class="na">URL</span> <span class="n">arg0</span><span class="o">,</span> <span class="n">org</span><span class="o">.</span><span class="na">apache</span><span class="o">.</span><span class="na">dubbo</span><span class="o">.</span><span class="na">remoting</span><span class="o">.</span><span class="na">ChannelHandler</span> <span class="n">arg1</span><span class="o">)</span> <span class="kd">throws</span> <span class="n">org</span><span class="o">.</span><span class="na">apache</span><span class="o">.</span><span class="na">dubbo</span><span class="o">.</span><span class="na">remoting</span><span class="o">.</span><span class="na">RemotingException</span> <span class="o">{</span>
+	<span class="o">...</span>
+	<span class="n">org</span><span class="o">.</span><span class="na">apache</span><span class="o">.</span><span class="na">dubbo</span><span class="o">.</span><span class="na">common</span><span class="o">.</span><span class="na">URL</span> <span class="n">url</span> <span class="o">=</span> <span class="n">arg0</span><span class="o">;</span>
+	<span class="c1">// 通过 @Adaptive 注解中的两个 key 去寻找实现类的名称</span>
+	<span class="nc">String</span> <span class="n">extName</span> <span class="o">=</span> <span class="n">url</span><span class="o">.</span><span class="na">getParameter</span><span class="o">(</span><span class="s">"server"</span><span class="o">,</span><span class="n">url</span><span class="o">.</span><span class="na">getParameter</span><span class="o">(</span><span class="s">"transporter"</span><span class="o">,</span><span class="s">"netty"</span><span class="o">));</span>
+	<span class="o">...</span>
+	<span class="k">try</span> <span class="o">{</span>
+	<span class="c1">// 根据 url 中的参数，尝试获取真正的扩展点实现类</span>
+		<span class="n">extension</span> <span class="o">=</span> <span class="o">(</span><span class="n">org</span><span class="o">.</span><span class="na">apache</span><span class="o">.</span><span class="na">dubbo</span><span class="o">.</span><span class="na">remoting</span><span class="o">.</span><span class="na">Transporter</span><span class="o">)</span><span class="nc">ExtensionLoader</span><span class="o">.</span><span class="na">getExtensionLoader</span><span class="o">(</span><span class="n">org</span><span class="o">.</span><span class="na">apache</span><span class="o">.</span><span class="na">dubbo</span><span class="o">.</span><span class="na">remoting</span><span class="o">.</span><span class="na">Transporter</span><span class="o">.</span><span class="na">class</span><span class="o">).</span><span class="na">getExtension</span><span class="o">(</span><span class="n">extName</span><span class="o">);</span>
+	<span class="o">}</span><span class="k">catch</span><span class="o">(</span><span class="nc">Exception</span> <span class="n">e</span><span class="o">){</span>
+		<span class="c1">// 获取失败使用默认的 netty 实现</span>
+		<span class="o">...</span>
+		<span class="n">extension</span> <span class="o">=</span> <span class="o">(</span><span class="n">org</span><span class="o">.</span><span class="na">apache</span><span class="o">.</span><span class="na">dubbo</span><span class="o">.</span><span class="na">remoting</span><span class="o">.</span><span class="na">Transporter</span><span class="o">)</span><span class="nc">ExtensionLoader</span><span class="o">.</span><span class="na">getExtensionLoader</span><span class="o">(</span><span class="n">org</span><span class="o">.</span><span class="na">apache</span><span class="o">.</span><span class="na">dubbo</span><span class="o">.</span><span class="na">remoting</span><span class="o">.</span><span class="na">Transporter</span><span class="o">.</span><span class="na">class</span><span class="o">).</span><span class="na">getExtension</span><span class="o">(</span><span class="n">netty</span><span class="o">);</span>
+	<span class="o">}</span>
+	<span class="c1">// 最终调用具体扩展点实现类的 bind 方法</span>
+	<span class="k">return</span> <span class="n">extension</span><span class="o">.</span><span class="na">bind</span><span class="o">(</span><span class="n">arg0</span><span class="o">,</span><span class="n">arg1</span><span class="o">);</span>
+<span class="o">}</span>
+</code></pre></div></div>
+
+<p>生成的源码中可以看出，自动生成的代码实现了很多通用功能，最终调用真正的接口实现。</p>
+
+<p>该注解放在实现类上，则整个实现类会直接作为默认实现。不在自动生成上面的代码。在扩展点接口的多个实现里，只能有一个实现可以加 @Adaptive 注解。如果多个实现类都有该注解，则抛出异常：More than 1 adaptive class found。</p>
+
+<p>@Adaptive 注解源码如下：</p>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nd">@Documented</span>
+<span class="nd">@Retention</span><span class="o">(</span><span class="nc">RetentionPolicy</span><span class="o">.</span><span class="na">RUNTIME</span><span class="o">)</span>
+<span class="nd">@Target</span><span class="o">({</span><span class="nc">ElementType</span><span class="o">.</span><span class="na">TYPE</span><span class="o">,</span> <span class="nc">ElementType</span><span class="o">.</span><span class="na">METHOD</span><span class="o">})</span>
+<span class="kd">public</span> <span class="nd">@interface</span> <span class="nc">Adaptive</span> <span class="o">{</span>
+   	<span class="c1">// 可以设置多个 key，按顺序匹配。</span>
+    <span class="nc">String</span><span class="o">[]</span> <span class="nf">value</span><span class="o">()</span> <span class="k">default</span> <span class="o">{};</span>
+
+<span class="o">}</span>
+</code></pre></div></div>
+
+<p>注解可以传入 value 数组，会依序进行匹配，如果匹配不到，则使用 @SPI 的默认值再去匹配，如果没有配置会抛出 IllegalStateException。</p>
+
+<p>另外，如果包装类（Wrapper）没有用 @Adaptive 指定 key值，也没有填写默认值，则 Dubbo 会自动把接口名称根据驼峰大小分开，并用 “.” 连接起来，以此作为默认实现类的名称，如 org.apache.dubbo.xxx.YyyInvokerWrapper 会被转化成 yyy.invoker.wrapper。</p>
+
+<p>最后，为什么有些实现类上会标注 @Adaptive 注解呢？主要是为了直接固定对应的实现而不需要动态生成代码实现。代码中，会缓存两个与 @Adaptive 有关的对象，一个缓存在 cachedAdaptiveClass，另一个缓存在 cachedAdaptiveInstance。扩展点初始化时，如果发现类上有 @Adaptive ，则直接赋值给 cachedAdaptiveClass，后续实例化类的时候，就不会再动态生成代码了，而是直接使用缓存的类生成对象并缓存到cachedAdaptiveInstance。如果注解在接口的方法上，则会根据参数，动态获得扩展点的实现，生成 Adaptive 类，再缓存到 cachedAdaptiveInstance。</p>
+
+<h2 id="23-扩展点自动激活注解activate">2.3 扩展点自动激活注解：@Activate</h2>
+
+<p>@Activate 可以标记在类、接口、枚举类和方法上。主要使用在有多个扩展点实现、需要根据不同条件被激活的长江中，如 Filter 需要多个同时激活，因为每个 Filter 实现的不同的功能。@Activate 可以传入的参数很多：</p>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nd">@Documented</span>
+<span class="nd">@Retention</span><span class="o">(</span><span class="nc">RetentionPolicy</span><span class="o">.</span><span class="na">RUNTIME</span><span class="o">)</span>
+<span class="nd">@Target</span><span class="o">({</span><span class="nc">ElementType</span><span class="o">.</span><span class="na">TYPE</span><span class="o">,</span> <span class="nc">ElementType</span><span class="o">.</span><span class="na">METHOD</span><span class="o">})</span>
+<span class="kd">public</span> <span class="nd">@interface</span> <span class="nc">Activate</span> <span class="o">{</span>
+    
+    <span class="c1">// URL 中的分组如果匹配则激活，则可以设置多个 </span>
+    <span class="nc">String</span><span class="o">[]</span> <span class="nf">group</span><span class="o">()</span> <span class="k">default</span> <span class="o">{};</span>
+
+  	<span class="c1">// 查找 URL 如果含有该 key，则激活</span>
+    <span class="nc">String</span><span class="o">[]</span> <span class="nf">value</span><span class="o">()</span> <span class="k">default</span> <span class="o">{};</span>
+	
+	<span class="c1">// 填写扩展点列表，表示哪些扩展点要在本扩展点前</span>
+    <span class="nd">@Deprecated</span>
+    <span class="nc">String</span><span class="o">[]</span> <span class="nf">before</span><span class="o">()</span> <span class="k">default</span> <span class="o">{};</span>
+
+    <span class="c1">// 同上，在后</span>
+    <span class="nd">@Deprecated</span>
+    <span class="nc">String</span><span class="o">[]</span> <span class="nf">after</span><span class="o">()</span> <span class="k">default</span> <span class="o">{};</span>
+
+    <span class="c1">// 排序值</span>
+    <span class="kt">int</span> <span class="nf">order</span><span class="o">()</span> <span class="k">default</span> <span class="mi">0</span><span class="o">;</span>
+<span class="o">}</span>
+</code></pre></div></div>
+
+<h1 id="三extensionloader-的工作原理">三、ExtensionLoader 的工作原理</h1>
+
+<p>ExtensionLoader 是整个扩展机制的主要逻辑类，实现了配置的加载、扩展类的缓存、自适应对象生成等所有工作。本节将结合源码讲解整个 ExtensionLoader 的工作流程。</p>
+
+<p>首先看 ExtensionLoader 的使用：</p>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nc">ExtensionLoader</span><span class="o">&lt;</span><span class="nc">Transporter</span><span class="o">&gt;</span> <span class="n">extensionLoader</span> <span class="o">=</span> <span class="nc">ExtensionLoader</span><span class="o">.</span><span class="na">getExtensionLoader</span><span class="o">(</span><span class="nc">Transporter</span><span class="o">.</span><span class="na">class</span><span class="o">);</span>
+        <span class="nc">System</span><span class="o">.</span><span class="na">out</span><span class="o">.</span><span class="na">println</span><span class="o">(</span><span class="n">extensionLoader</span><span class="o">.</span><span class="na">getExtension</span><span class="o">(</span><span class="s">"true"</span><span class="o">));</span>
+</code></pre></div></div>
+
+<p>ExtensionLoader 私有了构造器，只有一个静态方法供外部访问，通过 getExtensionLoader 获取 ExtensionLoader 实例。</p>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kd">public</span> <span class="kd">static</span> <span class="o">&lt;</span><span class="no">T</span><span class="o">&gt;</span> <span class="nc">ExtensionLoader</span><span class="o">&lt;</span><span class="no">T</span><span class="o">&gt;</span> <span class="nf">getExtensionLoader</span><span class="o">(</span><span class="nc">Class</span><span class="o">&lt;</span><span class="no">T</span><span class="o">&gt;</span> <span class="n">type</span><span class="o">)</span> <span class="o">{</span>
+    	<span class="c1">// 判空</span>
+        <span class="k">if</span> <span class="o">(</span><span class="n">type</span> <span class="o">==</span> <span class="kc">null</span><span class="o">)</span> <span class="o">{</span>
+            <span class="k">throw</span> <span class="k">new</span> <span class="nf">IllegalArgumentException</span><span class="o">(</span><span class="s">"Extension type == null"</span><span class="o">);</span>
+        <span class="o">}</span>
+    	<span class="c1">// 必须是接口</span>
+        <span class="k">if</span> <span class="o">(!</span><span class="n">type</span><span class="o">.</span><span class="na">isInterface</span><span class="o">())</span> <span class="o">{</span>
+            <span class="k">throw</span> <span class="k">new</span> <span class="nf">IllegalArgumentException</span><span class="o">(</span><span class="s">"Extension type ("</span> <span class="o">+</span> <span class="n">type</span> <span class="o">+</span> <span class="s">") is not an interface!"</span><span class="o">);</span>
+        <span class="o">}</span>
+    	<span class="c1">// 必须要有 SPI  注解</span>
+        <span class="k">if</span> <span class="o">(!</span><span class="n">withExtensionAnnotation</span><span class="o">(</span><span class="n">type</span><span class="o">))</span> <span class="o">{</span>
+            <span class="k">throw</span> <span class="k">new</span> <span class="nf">IllegalArgumentException</span><span class="o">(</span><span class="s">"Extension type ("</span> <span class="o">+</span> <span class="n">type</span> <span class="o">+</span>
+                    <span class="s">") is not an extension, because it is NOT annotated with @"</span> <span class="o">+</span> <span class="no">SPI</span><span class="o">.</span><span class="na">class</span><span class="o">.</span><span class="na">getSimpleName</span><span class="o">()</span> <span class="o">+</span> <span class="s">"!"</span><span class="o">);</span>
+        <span class="o">}</span>
+		<span class="c1">// 先从缓存拿</span>
+        <span class="nc">ExtensionLoader</span><span class="o">&lt;</span><span class="no">T</span><span class="o">&gt;</span> <span class="n">loader</span> <span class="o">=</span> <span class="o">(</span><span class="nc">ExtensionLoader</span><span class="o">&lt;</span><span class="no">T</span><span class="o">&gt;)</span> <span class="no">EXTENSION_LOADERS</span><span class="o">.</span><span class="na">get</span><span class="o">(</span><span class="n">type</span><span class="o">);</span>
+    	<span class="c1">// 缓存没有则使用私有的构造器创建对象并从缓存中获取返回。</span>
+        <span class="k">if</span> <span class="o">(</span><span class="n">loader</span> <span class="o">==</span> <span class="kc">null</span><span class="o">)</span> <span class="o">{</span>
+            <span class="no">EXTENSION_LOADERS</span><span class="o">.</span><span class="na">putIfAbsent</span><span class="o">(</span><span class="n">type</span><span class="o">,</span> <span class="k">new</span> <span class="nc">ExtensionLoader</span><span class="o">&lt;</span><span class="no">T</span><span class="o">&gt;(</span><span class="n">type</span><span class="o">));</span>
+            <span class="n">loader</span> <span class="o">=</span> <span class="o">(</span><span class="nc">ExtensionLoader</span><span class="o">&lt;</span><span class="no">T</span><span class="o">&gt;)</span> <span class="no">EXTENSION_LOADERS</span><span class="o">.</span><span class="na">get</span><span class="o">(</span><span class="n">type</span><span class="o">);</span>
+        <span class="o">}</span>
+        <span class="k">return</span> <span class="n">loader</span><span class="o">;</span>
+    <span class="o">}</span>
+
+	<span class="c1">// 构造函数 此时注入了自适应的 ExtensionFactory</span>
+	<span class="kd">private</span> <span class="nf">ExtensionLoader</span><span class="o">(</span><span class="nc">Class</span><span class="o">&lt;?&gt;</span> <span class="n">type</span><span class="o">)</span> <span class="o">{</span>
+        <span class="k">this</span><span class="o">.</span><span class="na">type</span> <span class="o">=</span> <span class="n">type</span><span class="o">;</span>
+        <span class="n">objectFactory</span> <span class="o">=</span> <span class="o">(</span><span class="n">type</span> <span class="o">==</span> <span class="nc">ExtensionFactory</span><span class="o">.</span><span class="na">class</span> <span class="o">?</span> <span class="kc">null</span> <span class="o">:</span> <span class="nc">ExtensionLoader</span><span class="o">.</span><span class="na">getExtensionLoader</span><span class="o">(</span><span class="nc">ExtensionFactory</span><span class="o">.</span><span class="na">class</span><span class="o">).</span><span class="na">getAdaptiveExtension</span><span class="o">());</span>
+    <span class="o">}</span>
+
+</code></pre></div></div>
+
+<h2 id="31-工作流程">3.1 工作流程</h2>
+
+<p>ExtensionLoader 的逻辑入口可以分为 getExtension、getAdaptiveExtension、getActivateExtension 三个。</p>
+
+<p>getActivateExtension 对 getExtension 依赖重，getAdaptiveExtension 相对独立。</p>
+
+<p>getActivateExtension 只是根据不同条件同时激活多个普通扩展类。因此该方法只会做一些通用逻辑判断，最终还是调用 getExtension 获得具体扩展点实现类。</p>
+
+<p>代码实现，首先看 Fields</p>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code>	<span class="c1">// 扩展类与对应的扩展类加载器缓存</span>
+	<span class="kd">private</span> <span class="kd">static</span> <span class="kd">final</span> <span class="nc">ConcurrentMap</span><span class="o">&lt;</span><span class="nc">Class</span><span class="o">&lt;?&gt;,</span> <span class="nc">ExtensionLoader</span><span class="o">&lt;?&gt;&gt;</span> <span class="no">EXTENSION_LOADERS</span> <span class="o">=</span> <span class="k">new</span> <span class="nc">ConcurrentHashMap</span><span class="o">&lt;&gt;();</span>
+	<span class="c1">// 扩展类与类初始化后的实例</span>
+    <span class="kd">private</span> <span class="kd">static</span> <span class="kd">final</span> <span class="nc">ConcurrentMap</span><span class="o">&lt;</span><span class="nc">Class</span><span class="o">&lt;?&gt;,</span> <span class="nc">Object</span><span class="o">&gt;</span> <span class="no">EXTENSION_INSTANCES</span> <span class="o">=</span> <span class="k">new</span> <span class="nc">ConcurrentHashMap</span><span class="o">&lt;&gt;();</span>
+	
+    <span class="kd">private</span> <span class="kd">final</span> <span class="nc">Class</span><span class="o">&lt;?&gt;</span> <span class="n">type</span><span class="o">;</span>
+	
+    <span class="kd">private</span> <span class="kd">final</span> <span class="nc">ExtensionFactory</span> <span class="n">objectFactory</span><span class="o">;</span>
+	<span class="c1">// 扩展类与扩展名缓存</span>
+    <span class="kd">private</span> <span class="kd">final</span> <span class="nc">ConcurrentMap</span><span class="o">&lt;</span><span class="nc">Class</span><span class="o">&lt;?&gt;,</span> <span class="nc">String</span><span class="o">&gt;</span> <span class="n">cachedNames</span> <span class="o">=</span> <span class="k">new</span> <span class="nc">ConcurrentHashMap</span><span class="o">&lt;&gt;();</span>
+	<span class="c1">// 普通扩展类缓存，不包括自适应扩展类和 Wrapper 类</span>
+    <span class="kd">private</span> <span class="kd">final</span> <span class="nc">Holder</span><span class="o">&lt;</span><span class="nc">Map</span><span class="o">&lt;</span><span class="nc">String</span><span class="o">,</span> <span class="nc">Class</span><span class="o">&lt;?&gt;&gt;&gt;</span> <span class="n">cachedClasses</span> <span class="o">=</span> <span class="k">new</span> <span class="nc">Holder</span><span class="o">&lt;&gt;();</span>
+	<span class="c1">// 扩展名与 @Activate 的缓存</span>
+    <span class="kd">private</span> <span class="kd">final</span> <span class="nc">Map</span><span class="o">&lt;</span><span class="nc">String</span><span class="o">,</span> <span class="nc">Object</span><span class="o">&gt;</span> <span class="n">cachedActivates</span> <span class="o">=</span> <span class="k">new</span> <span class="nc">ConcurrentHashMap</span><span class="o">&lt;&gt;();</span>
+	<span class="c1">// 扩展名与扩展对象缓存</span>
+    <span class="kd">private</span> <span class="kd">final</span> <span class="nc">ConcurrentMap</span><span class="o">&lt;</span><span class="nc">String</span><span class="o">,</span> <span class="nc">Holder</span><span class="o">&lt;</span><span class="nc">Object</span><span class="o">&gt;&gt;</span> <span class="n">cachedInstances</span> <span class="o">=</span> <span class="k">new</span> <span class="nc">ConcurrentHashMap</span><span class="o">&lt;&gt;();</span>
+	<span class="c1">// 实例化后的 Adaptive 扩展对象，只能同时存在一个</span>
+    <span class="kd">private</span> <span class="kd">final</span> <span class="nc">Holder</span><span class="o">&lt;</span><span class="nc">Object</span><span class="o">&gt;</span> <span class="n">cachedAdaptiveInstance</span> <span class="o">=</span> <span class="k">new</span> <span class="nc">Holder</span><span class="o">&lt;&gt;();</span>
+	<span class="c1">// 实例化后的 Adaptive 扩展类</span>
+    <span class="kd">private</span> <span class="kd">volatile</span> <span class="nc">Class</span><span class="o">&lt;?&gt;</span> <span class="n">cachedAdaptiveClass</span> <span class="o">=</span> <span class="kc">null</span><span class="o">;</span>
+    <span class="kd">private</span> <span class="nc">String</span> <span class="n">cachedDefaultName</span><span class="o">;</span>
+    <span class="kd">private</span> <span class="kd">volatile</span> <span class="nc">Throwable</span> <span class="n">createAdaptiveInstanceError</span><span class="o">;</span>
+
+    <span class="kd">private</span> <span class="nc">Set</span><span class="o">&lt;</span><span class="nc">Class</span><span class="o">&lt;?&gt;&gt;</span> <span class="n">cachedWrapperClasses</span><span class="o">;</span>
+</code></pre></div></div>
+
+<h2 id="32-getextension-的实现原理">3.2 getExtension 的实现原理</h2>
+
+<p>getExtension(String name) 实现了一个完整的普通扩展类的加载过程。每一步都会先读缓存</p>
+
+<p>流程：</p>
+
+<ol>
+  <li>框架读取 SPI 对应路径下的配置文件，根据配置加载所有扩展类并缓存（不初始化）。</li>
+  <li>根据传入的名称初始化对应的扩展类。</li>
+  <li>尝试查找符合条件的包装类</li>
+  <li>返回对应的扩展类实例</li>
+</ol>
+
+<p>代码实现，这里就不贴了。请自行查看</p>
+
+<p><a href="https://github.com/konekos/dubbo/blob/my-2.7.5/dubbo-common/src/main/java/org/apache/dubbo/common/extension/ExtensionLoader.java">ExtensionLoader.java</a></p>
+
+<p>这里有一步依赖注入，为 injectExtension 方法，类似 Spring IoC 的机制，实现原理为：反射获取所有拥有 setter</p>
+
+<p>的参数类型，然后通过 ExtensionFactory 查找类型相同的扩展类实例，如果找到则method 调用 invoke ，完成 setter 注入。另外，Wrapper 类的构造参数注入，也是通过这个方法实现的。</p>
+
+<h2 id="33-getadaptiveextension-的实现原理">3.3 getAdaptiveExtension 的实现原理</h2>
+
+<p>首先看源码中的测试用例</p>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nd">@Test</span>
+    <span class="kd">public</span> <span class="kt">void</span> <span class="nf">test_getAdaptiveExtension_defaultAdaptiveKey</span><span class="o">()</span> <span class="kd">throws</span> <span class="nc">Exception</span> <span class="o">{</span>
+        <span class="o">{</span>
+            <span class="nc">SimpleExt</span> <span class="n">ext</span> <span class="o">=</span> <span class="nc">ExtensionLoader</span><span class="o">.</span><span class="na">getExtensionLoader</span><span class="o">(</span><span class="nc">SimpleExt</span><span class="o">.</span><span class="na">class</span><span class="o">).</span><span class="na">getAdaptiveExtension</span><span class="o">();</span>
+
+            <span class="nc">Map</span><span class="o">&lt;</span><span class="nc">String</span><span class="o">,</span> <span class="nc">String</span><span class="o">&gt;</span> <span class="n">map</span> <span class="o">=</span> <span class="k">new</span> <span class="nc">HashMap</span><span class="o">&lt;</span><span class="nc">String</span><span class="o">,</span> <span class="nc">String</span><span class="o">&gt;();</span>
+            <span class="no">URL</span> <span class="n">url</span> <span class="o">=</span> <span class="k">new</span> <span class="no">URL</span><span class="o">(</span><span class="s">"p1"</span><span class="o">,</span> <span class="s">"1.2.3.4"</span><span class="o">,</span> <span class="mi">1010</span><span class="o">,</span> <span class="s">"path1"</span><span class="o">,</span> <span class="n">map</span><span class="o">);</span>
+
+            <span class="nc">String</span> <span class="n">echo</span> <span class="o">=</span> <span class="n">ext</span><span class="o">.</span><span class="na">echo</span><span class="o">(</span><span class="n">url</span><span class="o">,</span> <span class="s">"haha"</span><span class="o">);</span>
+            <span class="n">assertEquals</span><span class="o">(</span><span class="s">"Ext1Impl1-echo"</span><span class="o">,</span> <span class="n">echo</span><span class="o">);</span>
+        <span class="o">}</span>
+
+        <span class="o">{</span>
+            <span class="nc">SimpleExt</span> <span class="n">ext</span> <span class="o">=</span> <span class="nc">ExtensionLoader</span><span class="o">.</span><span class="na">getExtensionLoader</span><span class="o">(</span><span class="nc">SimpleExt</span><span class="o">.</span><span class="na">class</span><span class="o">).</span><span class="na">getAdaptiveExtension</span><span class="o">();</span>
+
+            <span class="nc">Map</span><span class="o">&lt;</span><span class="nc">String</span><span class="o">,</span> <span class="nc">String</span><span class="o">&gt;</span> <span class="n">map</span> <span class="o">=</span> <span class="k">new</span> <span class="nc">HashMap</span><span class="o">&lt;</span><span class="nc">String</span><span class="o">,</span> <span class="nc">String</span><span class="o">&gt;();</span>
+            <span class="n">map</span><span class="o">.</span><span class="na">put</span><span class="o">(</span><span class="s">"simple.ext"</span><span class="o">,</span> <span class="s">"impl2"</span><span class="o">);</span>
+            <span class="no">URL</span> <span class="n">url</span> <span class="o">=</span> <span class="k">new</span> <span class="no">URL</span><span class="o">(</span><span class="s">"p1"</span><span class="o">,</span> <span class="s">"1.2.3.4"</span><span class="o">,</span> <span class="mi">1010</span><span class="o">,</span> <span class="s">"path1"</span><span class="o">,</span> <span class="n">map</span><span class="o">);</span>
+
+            <span class="nc">String</span> <span class="n">echo</span> <span class="o">=</span> <span class="n">ext</span><span class="o">.</span><span class="na">echo</span><span class="o">(</span><span class="n">url</span><span class="o">,</span> <span class="s">"haha"</span><span class="o">);</span>
+            <span class="n">assertEquals</span><span class="o">(</span><span class="s">"Ext1Impl2-echo"</span><span class="o">,</span> <span class="n">echo</span><span class="o">);</span>
+        <span class="o">}</span>
+    <span class="o">}</span>
+
+<span class="nd">@SPI</span><span class="o">(</span><span class="s">"impl1"</span><span class="o">)</span>
+<span class="kd">public</span> <span class="kd">interface</span> <span class="nc">SimpleExt</span> <span class="o">{</span>
+    <span class="c1">// @Adaptive example, do not specify a explicit key.</span>
+    <span class="nd">@Adaptive</span>
+    <span class="nc">String</span> <span class="nf">echo</span><span class="o">(</span><span class="no">URL</span> <span class="n">url</span><span class="o">,</span> <span class="nc">String</span> <span class="n">s</span><span class="o">);</span>
+
+    <span class="nd">@Adaptive</span><span class="o">({</span><span class="s">"key1"</span><span class="o">,</span> <span class="s">"key2"</span><span class="o">})</span>
+    <span class="nc">String</span> <span class="nf">yell</span><span class="o">(</span><span class="no">URL</span> <span class="n">url</span><span class="o">,</span> <span class="nc">String</span> <span class="n">s</span><span class="o">);</span>
+
+    <span class="c1">// no @Adaptive</span>
+    <span class="nc">String</span> <span class="nf">bang</span><span class="o">(</span><span class="no">URL</span> <span class="n">url</span><span class="o">,</span> <span class="kt">int</span> <span class="n">i</span><span class="o">);</span>
+<span class="o">}</span>
+</code></pre></div></div>
+
+<p>SPI 上默认实现为 impl1。</p>
+
+<p>生成的自适应代码如下：</p>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kn">package</span> <span class="nn">org.apache.dubbo.common.extension.ext1</span><span class="o">;</span>
+<span class="kn">import</span> <span class="nn">org.apache.dubbo.common.extension.ExtensionLoader</span><span class="o">;</span>
+<span class="kd">public</span> <span class="kd">class</span> <span class="nc">SimpleExt</span><span class="n">$Adaptive</span> <span class="kd">implements</span> <span class="n">org</span><span class="o">.</span><span class="na">apache</span><span class="o">.</span><span class="na">dubbo</span><span class="o">.</span><span class="na">common</span><span class="o">.</span><span class="na">extension</span><span class="o">.</span><span class="na">ext1</span><span class="o">.</span><span class="na">SimpleExt</span> <span class="o">{</span>
+    <span class="kd">public</span> <span class="n">java</span><span class="o">.</span><span class="na">lang</span><span class="o">.</span><span class="na">String</span> <span class="nf">echo</span><span class="o">(</span><span class="n">org</span><span class="o">.</span><span class="na">apache</span><span class="o">.</span><span class="na">dubbo</span><span class="o">.</span><span class="na">common</span><span class="o">.</span><span class="na">URL</span> <span class="n">arg0</span><span class="o">,</span> <span class="n">java</span><span class="o">.</span><span class="na">lang</span><span class="o">.</span><span class="na">String</span> <span class="n">arg1</span><span class="o">)</span>  <span class="o">{</span>
+        <span class="k">if</span> <span class="o">(</span><span class="n">arg0</span> <span class="o">==</span> <span class="kc">null</span><span class="o">)</span> <span class="k">throw</span> <span class="k">new</span> <span class="nc">IllegalArgumentException</span><span class="o">(</span><span class="s">"url == null"</span><span class="o">);</span>
+        <span class="n">org</span><span class="o">.</span><span class="na">apache</span><span class="o">.</span><span class="na">dubbo</span><span class="o">.</span><span class="na">common</span><span class="o">.</span><span class="na">URL</span> <span class="n">url</span> <span class="o">=</span> <span class="n">arg0</span><span class="o">;</span>
+        <span class="nc">String</span> <span class="n">extName</span> <span class="o">=</span> <span class="n">url</span><span class="o">.</span><span class="na">getParameter</span><span class="o">(</span><span class="s">"simple.ext"</span><span class="o">,</span> <span class="s">"impl1"</span><span class="o">);</span>
+        <span class="k">if</span><span class="o">(</span><span class="n">extName</span> <span class="o">==</span> <span class="kc">null</span><span class="o">)</span> <span class="k">throw</span> <span class="k">new</span> <span class="nc">IllegalStateException</span><span class="o">(</span><span class="s">"Failed to get extension (org.apache.dubbo.common.extension.ext1.SimpleExt) name from url ("</span> <span class="o">+</span> <span class="n">url</span><span class="o">.</span><span class="na">toString</span><span class="o">()</span> <span class="o">+</span> <span class="s">") use keys([simple.ext])"</span><span class="o">);</span>
+        <span class="n">org</span><span class="o">.</span><span class="na">apache</span><span class="o">.</span><span class="na">dubbo</span><span class="o">.</span><span class="na">common</span><span class="o">.</span><span class="na">extension</span><span class="o">.</span><span class="na">ext1</span><span class="o">.</span><span class="na">SimpleExt</span> <span class="n">extension</span> <span class="o">=</span> <span class="o">(</span><span class="n">org</span><span class="o">.</span><span class="na">apache</span><span class="o">.</span><span class="na">dubbo</span><span class="o">.</span><span class="na">common</span><span class="o">.</span><span class="na">extension</span><span class="o">.</span><span class="na">ext1</span><span class="o">.</span><span class="na">SimpleExt</span><span class="o">)</span><span class="nc">ExtensionLoader</span><span class="o">.</span><span class="na">getExtensionLoader</span><span class="o">(</span><span class="n">org</span><span class="o">.</span><span class="na">apache</span><span class="o">.</span><span class="na">dubbo</span><span class="o">.</span><span class="na">common</span><span class="o">.</span><span class="na">extension</span><span class="o">.</span><span class="na">ext1</span><span class="o">.</span><span class="na">SimpleExt</span><span class="o">.</span><span class="na">class</span><span class="o">).</span><span class="na">getExtension</span><span class="o">(</span><span class="n">extName</span><span class="o">);</span>
+        <span class="k">return</span> <span class="n">extension</span><span class="o">.</span><span class="na">echo</span><span class="o">(</span><span class="n">arg0</span><span class="o">,</span> <span class="n">arg1</span><span class="o">);</span>
+    <span class="o">}</span>
+    <span class="kd">public</span> <span class="n">java</span><span class="o">.</span><span class="na">lang</span><span class="o">.</span><span class="na">String</span> <span class="nf">yell</span><span class="o">(</span><span class="n">org</span><span class="o">.</span><span class="na">apache</span><span class="o">.</span><span class="na">dubbo</span><span class="o">.</span><span class="na">common</span><span class="o">.</span><span class="na">URL</span> <span class="n">arg0</span><span class="o">,</span> <span class="n">java</span><span class="o">.</span><span class="na">lang</span><span class="o">.</span><span class="na">String</span> <span class="n">arg1</span><span class="o">)</span>  <span class="o">{</span>
+        <span class="k">if</span> <span class="o">(</span><span class="n">arg0</span> <span class="o">==</span> <span class="kc">null</span><span class="o">)</span> <span class="k">throw</span> <span class="k">new</span> <span class="nc">IllegalArgumentException</span><span class="o">(</span><span class="s">"url == null"</span><span class="o">);</span>
+        <span class="n">org</span><span class="o">.</span><span class="na">apache</span><span class="o">.</span><span class="na">dubbo</span><span class="o">.</span><span class="na">common</span><span class="o">.</span><span class="na">URL</span> <span class="n">url</span> <span class="o">=</span> <span class="n">arg0</span><span class="o">;</span>
+        <span class="nc">String</span> <span class="n">extName</span> <span class="o">=</span> <span class="n">url</span><span class="o">.</span><span class="na">getParameter</span><span class="o">(</span><span class="s">"key1"</span><span class="o">,</span> <span class="n">url</span><span class="o">.</span><span class="na">getParameter</span><span class="o">(</span><span class="s">"key2"</span><span class="o">,</span> <span class="s">"impl1"</span><span class="o">));</span>
+        <span class="k">if</span><span class="o">(</span><span class="n">extName</span> <span class="o">==</span> <span class="kc">null</span><span class="o">)</span> <span class="k">throw</span> <span class="k">new</span> <span class="nc">IllegalStateException</span><span class="o">(</span><span class="s">"Failed to get extension (org.apache.dubbo.common.extension.ext1.SimpleExt) name from url ("</span> <span class="o">+</span> <span class="n">url</span><span class="o">.</span><span class="na">toString</span><span class="o">()</span> <span class="o">+</span> <span class="s">") use keys([key1, key2])"</span><span class="o">);</span>
+        <span class="n">org</span><span class="o">.</span><span class="na">apache</span><span class="o">.</span><span class="na">dubbo</span><span class="o">.</span><span class="na">common</span><span class="o">.</span><span class="na">extension</span><span class="o">.</span><span class="na">ext1</span><span class="o">.</span><span class="na">SimpleExt</span> <span class="n">extension</span> <span class="o">=</span> <span class="o">(</span><span class="n">org</span><span class="o">.</span><span class="na">apache</span><span class="o">.</span><span class="na">dubbo</span><span class="o">.</span><span class="na">common</span><span class="o">.</span><span class="na">extension</span><span class="o">.</span><span class="na">ext1</span><span class="o">.</span><span class="na">SimpleExt</span><span class="o">)</span><span class="nc">ExtensionLoader</span><span class="o">.</span><span class="na">getExtensionLoader</span><span class="o">(</span><span class="n">org</span><span class="o">.</span><span class="na">apache</span><span class="o">.</span><span class="na">dubbo</span><span class="o">.</span><span class="na">common</span><span class="o">.</span><span class="na">extension</span><span class="o">.</span><span class="na">ext1</span><span class="o">.</span><span class="na">SimpleExt</span><span class="o">.</span><span class="na">class</span><span class="o">).</span><span class="na">getExtension</span><span class="o">(</span><span class="n">extName</span><span class="o">);</span>
+        <span class="k">return</span> <span class="n">extension</span><span class="o">.</span><span class="na">yell</span><span class="o">(</span><span class="n">arg0</span><span class="o">,</span> <span class="n">arg1</span><span class="o">);</span>
+    <span class="o">}</span>
+    <span class="kd">public</span> <span class="n">java</span><span class="o">.</span><span class="na">lang</span><span class="o">.</span><span class="na">String</span> <span class="nf">bang</span><span class="o">(</span><span class="n">org</span><span class="o">.</span><span class="na">apache</span><span class="o">.</span><span class="na">dubbo</span><span class="o">.</span><span class="na">common</span><span class="o">.</span><span class="na">URL</span> <span class="n">arg0</span><span class="o">,</span> <span class="kt">int</span> <span class="n">arg1</span><span class="o">)</span>  <span class="o">{</span>
+        <span class="k">throw</span> <span class="k">new</span> <span class="nf">UnsupportedOperationException</span><span class="o">(</span><span class="s">"The method public abstract java.lang.String org.apache.dubbo.common.extension.ext1.SimpleExt.bang(org.apache.dubbo.common.URL,int) of interface org.apache.dubbo.common.extension.ext1.SimpleExt is not adaptive method!"</span><span class="o">);</span>
+    <span class="o">}</span>
+<span class="o">}</span>
+</code></pre></div></div>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kn">package</span> <span class="nn">org.apache.dubbo.common.extension.ext1</span><span class="o">;</span>
+
+<span class="kn">import</span> <span class="nn">org.apache.dubbo.common.extension.ExtensionLoader</span><span class="o">;</span>
+
+<span class="kd">public</span> <span class="kd">class</span> <span class="nc">SimpleExt</span><span class="n">$Adaptive</span> <span class="kd">implements</span> <span class="n">org</span><span class="o">.</span><span class="na">apache</span><span class="o">.</span><span class="na">dubbo</span><span class="o">.</span><span class="na">common</span><span class="o">.</span><span class="na">extension</span><span class="o">.</span><span class="na">ext1</span><span class="o">.</span><span class="na">SimpleExt</span> <span class="o">{</span>
+    <span class="kd">public</span> <span class="n">java</span><span class="o">.</span><span class="na">lang</span><span class="o">.</span><span class="na">String</span> <span class="nf">bang</span><span class="o">(</span><span class="n">org</span><span class="o">.</span><span class="na">apache</span><span class="o">.</span><span class="na">dubbo</span><span class="o">.</span><span class="na">common</span><span class="o">.</span><span class="na">URL</span> <span class="n">arg0</span><span class="o">,</span> <span class="kt">int</span> <span class="n">arg1</span><span class="o">)</span> <span class="o">{</span>
+        <span class="k">throw</span> <span class="k">new</span> <span class="nf">UnsupportedOperationException</span><span class="o">(</span><span class="s">"The method public abstract java.lang.String org.apache.dubbo.common.extension.ext1.SimpleExt.bang(org.apache.dubbo.common.URL,int) of interface org.apache.dubbo.common.extension.ext1.SimpleExt is not adaptive method!"</span><span class="o">);</span>
+    <span class="o">}</span>
+
+    <span class="kd">public</span> <span class="n">java</span><span class="o">.</span><span class="na">lang</span><span class="o">.</span><span class="na">String</span> <span class="nf">echo</span><span class="o">(</span><span class="n">org</span><span class="o">.</span><span class="na">apache</span><span class="o">.</span><span class="na">dubbo</span><span class="o">.</span><span class="na">common</span><span class="o">.</span><span class="na">URL</span> <span class="n">arg0</span><span class="o">,</span> <span class="n">java</span><span class="o">.</span><span class="na">lang</span><span class="o">.</span><span class="na">String</span> <span class="n">arg1</span><span class="o">)</span> <span class="o">{</span>
+        <span class="k">if</span> <span class="o">(</span><span class="n">arg0</span> <span class="o">==</span> <span class="kc">null</span><span class="o">)</span> <span class="k">throw</span> <span class="k">new</span> <span class="nc">IllegalArgumentException</span><span class="o">(</span><span class="s">"url == null"</span><span class="o">);</span>
+        <span class="n">org</span><span class="o">.</span><span class="na">apache</span><span class="o">.</span><span class="na">dubbo</span><span class="o">.</span><span class="na">common</span><span class="o">.</span><span class="na">URL</span> <span class="n">url</span> <span class="o">=</span> <span class="n">arg0</span><span class="o">;</span>
+        <span class="nc">String</span> <span class="n">extName</span> <span class="o">=</span> <span class="n">url</span><span class="o">.</span><span class="na">getParameter</span><span class="o">(</span><span class="s">"simple.ext"</span><span class="o">,</span> <span class="s">"impl1"</span><span class="o">);</span>
+        <span class="k">if</span> <span class="o">(</span><span class="n">extName</span> <span class="o">==</span> <span class="kc">null</span><span class="o">)</span>
+            <span class="k">throw</span> <span class="k">new</span> <span class="nf">IllegalStateException</span><span class="o">(</span><span class="s">"Failed to get extension (org.apache.dubbo.common.extension.ext1.SimpleExt) name from url ("</span> <span class="o">+</span> <span class="n">url</span><span class="o">.</span><span class="na">toString</span><span class="o">()</span> <span class="o">+</span> <span class="s">") use keys([simple.ext])"</span><span class="o">);</span>
+        <span class="n">org</span><span class="o">.</span><span class="na">apache</span><span class="o">.</span><span class="na">dubbo</span><span class="o">.</span><span class="na">common</span><span class="o">.</span><span class="na">extension</span><span class="o">.</span><span class="na">ext1</span><span class="o">.</span><span class="na">SimpleExt</span> <span class="n">extension</span> <span class="o">=</span> <span class="o">(</span><span class="n">org</span><span class="o">.</span><span class="na">apache</span><span class="o">.</span><span class="na">dubbo</span><span class="o">.</span><span class="na">common</span><span class="o">.</span><span class="na">extension</span><span class="o">.</span><span class="na">ext1</span><span class="o">.</span><span class="na">SimpleExt</span><span class="o">)</span> <span class="nc">ExtensionLoader</span><span class="o">.</span><span class="na">getExtensionLoader</span><span class="o">(</span><span class="n">org</span><span class="o">.</span><span class="na">apache</span><span class="o">.</span><span class="na">dubbo</span><span class="o">.</span><span class="na">common</span><span class="o">.</span><span class="na">extension</span><span class="o">.</span><span class="na">ext1</span><span class="o">.</span><span class="na">SimpleExt</span><span class="o">.</span><span class="na">class</span><span class="o">).</span><span class="na">getExtension</span><span class="o">(</span><span class="n">extName</span><span class="o">);</span>
+        <span class="k">return</span> <span class="n">extension</span><span class="o">.</span><span class="na">echo</span><span class="o">(</span><span class="n">arg0</span><span class="o">,</span> <span class="n">arg1</span><span class="o">);</span>
+    <span class="o">}</span>
+
+    <span class="kd">public</span> <span class="n">java</span><span class="o">.</span><span class="na">lang</span><span class="o">.</span><span class="na">String</span> <span class="nf">yell</span><span class="o">(</span><span class="n">org</span><span class="o">.</span><span class="na">apache</span><span class="o">.</span><span class="na">dubbo</span><span class="o">.</span><span class="na">common</span><span class="o">.</span><span class="na">URL</span> <span class="n">arg0</span><span class="o">,</span> <span class="n">java</span><span class="o">.</span><span class="na">lang</span><span class="o">.</span><span class="na">String</span> <span class="n">arg1</span><span class="o">)</span> <span class="o">{</span>
+        <span class="k">if</span> <span class="o">(</span><span class="n">arg0</span> <span class="o">==</span> <span class="kc">null</span><span class="o">)</span> <span class="k">throw</span> <span class="k">new</span> <span class="nc">IllegalArgumentException</span><span class="o">(</span><span class="s">"url == null"</span><span class="o">);</span>
+        <span class="n">org</span><span class="o">.</span><span class="na">apache</span><span class="o">.</span><span class="na">dubbo</span><span class="o">.</span><span class="na">common</span><span class="o">.</span><span class="na">URL</span> <span class="n">url</span> <span class="o">=</span> <span class="n">arg0</span><span class="o">;</span>
+        <span class="nc">String</span> <span class="n">extName</span> <span class="o">=</span> <span class="n">url</span><span class="o">.</span><span class="na">getParameter</span><span class="o">(</span><span class="s">"key1"</span><span class="o">,</span> <span class="n">url</span><span class="o">.</span><span class="na">getParameter</span><span class="o">(</span><span class="s">"key2"</span><span class="o">,</span> <span class="s">"impl1"</span><span class="o">));</span>
+        <span class="k">if</span> <span class="o">(</span><span class="n">extName</span> <span class="o">==</span> <span class="kc">null</span><span class="o">)</span>
+            <span class="k">throw</span> <span class="k">new</span> <span class="nf">IllegalStateException</span><span class="o">(</span><span class="s">"Failed to get extension (org.apache.dubbo.common.extension.ext1.SimpleExt) name from url ("</span> <span class="o">+</span> <span class="n">url</span><span class="o">.</span><span class="na">toString</span><span class="o">()</span> <span class="o">+</span> <span class="s">") use keys([key1, key2])"</span><span class="o">);</span>
+        <span class="n">org</span><span class="o">.</span><span class="na">apache</span><span class="o">.</span><span class="na">dubbo</span><span class="o">.</span><span class="na">common</span><span class="o">.</span><span class="na">extension</span><span class="o">.</span><span class="na">ext1</span><span class="o">.</span><span class="na">SimpleExt</span> <span class="n">extension</span> <span class="o">=</span> <span class="o">(</span><span class="n">org</span><span class="o">.</span><span class="na">apache</span><span class="o">.</span><span class="na">dubbo</span><span class="o">.</span><span class="na">common</span><span class="o">.</span><span class="na">extension</span><span class="o">.</span><span class="na">ext1</span><span class="o">.</span><span class="na">SimpleExt</span><span class="o">)</span> <span class="nc">ExtensionLoader</span><span class="o">.</span><span class="na">getExtensionLoader</span><span class="o">(</span><span class="n">org</span><span class="o">.</span><span class="na">apache</span><span class="o">.</span><span class="na">dubbo</span><span class="o">.</span><span class="na">common</span><span class="o">.</span><span class="na">extension</span><span class="o">.</span><span class="na">ext1</span><span class="o">.</span><span class="na">SimpleExt</span><span class="o">.</span><span class="na">class</span><span class="o">).</span><span class="na">getExtension</span><span class="o">(</span><span class="n">extName</span><span class="o">);</span>
+        <span class="k">return</span> <span class="n">extension</span><span class="o">.</span><span class="na">yell</span><span class="o">(</span><span class="n">arg0</span><span class="o">,</span> <span class="n">arg1</span><span class="o">);</span>
+    <span class="o">}</span>
+<span class="o">}</span>
+</code></pre></div></div>
+
+<p>自适应扩展点是通过自动生成实现类字符串，然后动态编译并生成对象实现的。</p>
+
+<p>代码生成过程可参考：</p>
+
+<p><a href="https://github.com/konekos/dubbo/blob/my-2.7.5/dubbo-common/src/main/java/org/apache/dubbo/common/extension/AdaptiveClassCodeGenerator.java">AdaptiveClassCodeGenerator.java</a></p>
+
+<p>Dubbo 的编译器也是一个 Adaptive 接口，但 @Adaptive 是加在类 AdaptiveCompiler 上的。所有这个类就是默认实现，不用做代码生成和编译。</p>
+
+<p>如果一个接口上的 @SPI 注解了默认实现，且方法上的 @Adaptive 也标明了默认实现，那么会使用哪个标注呢？从第二个单元测试用例动态生成的类可以看到，String extName = url.getParameter(“key1”, url.getParameter(“key2”, “impl1”))，是先根据key1找，再找key2，没有的话使用默认的实现。</p>
+
+<h2 id="34-getactivateextension-实现原理">3.4 getActivateExtension 实现原理</h2>
+
+<p>单元测试用例：</p>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code>        <span class="no">URL</span> <span class="n">url</span> <span class="o">=</span> <span class="no">URL</span><span class="o">.</span><span class="na">valueOf</span><span class="o">(</span><span class="s">"test://localhost/test"</span><span class="o">);</span>
+        <span class="nc">List</span><span class="o">&lt;</span><span class="nc">ActivateExt1</span><span class="o">&gt;</span> <span class="n">list</span> <span class="o">=</span> <span class="n">getExtensionLoader</span><span class="o">(</span><span class="nc">ActivateExt1</span><span class="o">.</span><span class="na">class</span><span class="o">)</span>
+            <span class="o">.</span><span class="na">getActivateExtension</span><span class="o">(</span><span class="n">url</span><span class="o">,</span> <span class="k">new</span> <span class="nc">String</span><span class="o">[]{},</span> <span class="s">"default_group"</span><span class="o">);</span>
+        <span class="nc">Assertions</span><span class="o">.</span><span class="na">assertEquals</span><span class="o">(</span><span class="mi">1</span><span class="o">,</span> <span class="n">list</span><span class="o">.</span><span class="na">size</span><span class="o">());</span>
+        <span class="nc">Assertions</span><span class="o">.</span><span class="na">assertSame</span><span class="o">(</span><span class="n">list</span><span class="o">.</span><span class="na">get</span><span class="o">(</span><span class="mi">0</span><span class="o">).</span><span class="na">getClass</span><span class="o">(),</span> <span class="nc">ActivateExt1Impl1</span><span class="o">.</span><span class="na">class</span><span class="o">);</span>
+
+<span class="nd">@Activate</span><span class="o">(</span><span class="n">group</span> <span class="o">=</span> <span class="o">{</span><span class="s">"default_group"</span><span class="o">})</span>
+<span class="kd">public</span> <span class="kd">class</span> <span class="nc">ActivateExt1Impl1</span> <span class="kd">implements</span> <span class="nc">ActivateExt1</span> <span class="o">{</span>
+    <span class="kd">public</span> <span class="nc">String</span> <span class="nf">echo</span><span class="o">(</span><span class="nc">String</span> <span class="n">msg</span><span class="o">)</span> <span class="o">{</span>
+        <span class="k">return</span> <span class="n">msg</span><span class="o">;</span>
+    <span class="o">}</span>
+<span class="o">}</span>
+</code></pre></div></div>
+
+<p><code class="language-plaintext highlighter-rouge">getActivateExtension(URL url, String[] values, String group)</code> 可以获取所有自动激活扩展点。实现逻辑比较简单：</p>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kd">public</span> <span class="nc">List</span><span class="o">&lt;</span><span class="no">T</span><span class="o">&gt;</span> <span class="nf">getActivateExtension</span><span class="o">(</span><span class="no">URL</span> <span class="n">url</span><span class="o">,</span> <span class="nc">String</span><span class="o">[]</span> <span class="n">values</span><span class="o">,</span> <span class="nc">String</span> <span class="n">group</span><span class="o">)</span> <span class="o">{</span>
+        <span class="nc">List</span><span class="o">&lt;</span><span class="no">T</span><span class="o">&gt;</span> <span class="n">exts</span> <span class="o">=</span> <span class="k">new</span> <span class="nc">ArrayList</span><span class="o">&lt;&gt;();</span>
+        <span class="nc">List</span><span class="o">&lt;</span><span class="nc">String</span><span class="o">&gt;</span> <span class="n">names</span> <span class="o">=</span> <span class="n">values</span> <span class="o">==</span> <span class="kc">null</span> <span class="o">?</span> <span class="k">new</span> <span class="nc">ArrayList</span><span class="o">&lt;&gt;(</span><span class="mi">0</span><span class="o">)</span> <span class="o">:</span> <span class="nc">Arrays</span><span class="o">.</span><span class="na">asList</span><span class="o">(</span><span class="n">values</span><span class="o">);</span>
+        <span class="k">if</span> <span class="o">(!</span><span class="n">names</span><span class="o">.</span><span class="na">contains</span><span class="o">(</span><span class="no">REMOVE_VALUE_PREFIX</span> <span class="o">+</span> <span class="no">DEFAULT_KEY</span><span class="o">))</span> <span class="o">{</span>
+            <span class="c1">// 加载所有扩展点（先缓存获取）</span>
+            <span class="n">getExtensionClasses</span><span class="o">();</span>
+            <span class="c1">// 遍历 cachedActivates 缓存</span>
+            <span class="k">for</span> <span class="o">(</span><span class="nc">Map</span><span class="o">.</span><span class="na">Entry</span><span class="o">&lt;</span><span class="nc">String</span><span class="o">,</span> <span class="nc">Object</span><span class="o">&gt;</span> <span class="n">entry</span> <span class="o">:</span> <span class="n">cachedActivates</span><span class="o">.</span><span class="na">entrySet</span><span class="o">())</span> <span class="o">{</span>
+                <span class="nc">String</span> <span class="n">name</span> <span class="o">=</span> <span class="n">entry</span><span class="o">.</span><span class="na">getKey</span><span class="o">();</span>
+                <span class="nc">Object</span> <span class="n">activate</span> <span class="o">=</span> <span class="n">entry</span><span class="o">.</span><span class="na">getValue</span><span class="o">();</span>
+
+                <span class="nc">String</span><span class="o">[]</span> <span class="n">activateGroup</span><span class="o">,</span> <span class="n">activateValue</span><span class="o">;</span>
+                <span class="c1">// 必须要有 Activate 注解</span>
+                <span class="k">if</span> <span class="o">(</span><span class="n">activate</span> <span class="k">instanceof</span> <span class="nc">Activate</span><span class="o">)</span> <span class="o">{</span>
+                    <span class="n">activateGroup</span> <span class="o">=</span> <span class="o">((</span><span class="nc">Activate</span><span class="o">)</span> <span class="n">activate</span><span class="o">).</span><span class="na">group</span><span class="o">();</span>
+                    <span class="n">activateValue</span> <span class="o">=</span> <span class="o">((</span><span class="nc">Activate</span><span class="o">)</span> <span class="n">activate</span><span class="o">).</span><span class="na">value</span><span class="o">();</span>
+                <span class="o">}</span> <span class="k">else</span> <span class="k">if</span> <span class="o">(</span><span class="n">activate</span> <span class="k">instanceof</span> <span class="n">com</span><span class="o">.</span><span class="na">alibaba</span><span class="o">.</span><span class="na">dubbo</span><span class="o">.</span><span class="na">common</span><span class="o">.</span><span class="na">extension</span><span class="o">.</span><span class="na">Activate</span><span class="o">)</span> <span class="o">{</span>
+                    <span class="n">activateGroup</span> <span class="o">=</span> <span class="o">((</span><span class="n">com</span><span class="o">.</span><span class="na">alibaba</span><span class="o">.</span><span class="na">dubbo</span><span class="o">.</span><span class="na">common</span><span class="o">.</span><span class="na">extension</span><span class="o">.</span><span class="na">Activate</span><span class="o">)</span> <span class="n">activate</span><span class="o">).</span><span class="na">group</span><span class="o">();</span>
+                    <span class="n">activateValue</span> <span class="o">=</span> <span class="o">((</span><span class="n">com</span><span class="o">.</span><span class="na">alibaba</span><span class="o">.</span><span class="na">dubbo</span><span class="o">.</span><span class="na">common</span><span class="o">.</span><span class="na">extension</span><span class="o">.</span><span class="na">Activate</span><span class="o">)</span> <span class="n">activate</span><span class="o">).</span><span class="na">value</span><span class="o">();</span>
+                <span class="o">}</span> <span class="k">else</span> <span class="o">{</span>
+                    <span class="k">continue</span><span class="o">;</span>
+                <span class="o">}</span>
+                <span class="c1">// 匹配 name 和 group，通过getExtension 获取实例后添加到 exts</span>
+                <span class="k">if</span> <span class="o">(</span><span class="n">isMatchGroup</span><span class="o">(</span><span class="n">group</span><span class="o">,</span> <span class="n">activateGroup</span><span class="o">)</span>
+                        <span class="o">&amp;&amp;</span> <span class="o">!</span><span class="n">names</span><span class="o">.</span><span class="na">contains</span><span class="o">(</span><span class="n">name</span><span class="o">)</span>
+                        <span class="o">&amp;&amp;</span> <span class="o">!</span><span class="n">names</span><span class="o">.</span><span class="na">contains</span><span class="o">(</span><span class="no">REMOVE_VALUE_PREFIX</span> <span class="o">+</span> <span class="n">name</span><span class="o">)</span>
+                        <span class="o">&amp;&amp;</span> <span class="n">isActive</span><span class="o">(</span><span class="n">activateValue</span><span class="o">,</span> <span class="n">url</span><span class="o">))</span> <span class="o">{</span>
+                    <span class="n">exts</span><span class="o">.</span><span class="na">add</span><span class="o">(</span><span class="n">getExtension</span><span class="o">(</span><span class="n">name</span><span class="o">));</span>
+                <span class="o">}</span>
+            <span class="o">}</span>
+            <span class="c1">// 排序</span>
+            <span class="n">exts</span><span class="o">.</span><span class="na">sort</span><span class="o">(</span><span class="nc">ActivateComparator</span><span class="o">.</span><span class="na">COMPARATOR</span><span class="o">);</span>
+        <span class="o">}</span>
+    	<span class="c1">// URL 如果传入 -default，所有默认的 @Activate 都不被激活，只有 URL 指定的被激活</span>
+    	<span class="c1">// 如果传入了 -开头的扩展点名，则该扩展点也不会激活</span>
+        <span class="nc">List</span><span class="o">&lt;</span><span class="no">T</span><span class="o">&gt;</span> <span class="n">usrs</span> <span class="o">=</span> <span class="k">new</span> <span class="nc">ArrayList</span><span class="o">&lt;&gt;();</span>
+        <span class="k">for</span> <span class="o">(</span><span class="kt">int</span> <span class="n">i</span> <span class="o">=</span> <span class="mi">0</span><span class="o">;</span> <span class="n">i</span> <span class="o">&lt;</span> <span class="n">names</span><span class="o">.</span><span class="na">size</span><span class="o">();</span> <span class="n">i</span><span class="o">++)</span> <span class="o">{</span>
+            <span class="nc">String</span> <span class="n">name</span> <span class="o">=</span> <span class="n">names</span><span class="o">.</span><span class="na">get</span><span class="o">(</span><span class="n">i</span><span class="o">);</span>
+            <span class="k">if</span> <span class="o">(!</span><span class="n">name</span><span class="o">.</span><span class="na">startsWith</span><span class="o">(</span><span class="no">REMOVE_VALUE_PREFIX</span><span class="o">)</span>
+                    <span class="o">&amp;&amp;</span> <span class="o">!</span><span class="n">names</span><span class="o">.</span><span class="na">contains</span><span class="o">(</span><span class="no">REMOVE_VALUE_PREFIX</span> <span class="o">+</span> <span class="n">name</span><span class="o">))</span> <span class="o">{</span>
+                <span class="k">if</span> <span class="o">(</span><span class="no">DEFAULT_KEY</span><span class="o">.</span><span class="na">equals</span><span class="o">(</span><span class="n">name</span><span class="o">))</span> <span class="o">{</span>
+                    <span class="k">if</span> <span class="o">(!</span><span class="n">usrs</span><span class="o">.</span><span class="na">isEmpty</span><span class="o">())</span> <span class="o">{</span>
+                        <span class="n">exts</span><span class="o">.</span><span class="na">addAll</span><span class="o">(</span><span class="mi">0</span><span class="o">,</span> <span class="n">usrs</span><span class="o">);</span>
+                        <span class="n">usrs</span><span class="o">.</span><span class="na">clear</span><span class="o">();</span>
+                    <span class="o">}</span>
+                <span class="o">}</span> <span class="k">else</span> <span class="o">{</span>
+                    <span class="n">usrs</span><span class="o">.</span><span class="na">add</span><span class="o">(</span><span class="n">getExtension</span><span class="o">(</span><span class="n">name</span><span class="o">));</span>
+                <span class="o">}</span>
+            <span class="o">}</span>
+        <span class="o">}</span>
+        <span class="k">if</span> <span class="o">(!</span><span class="n">usrs</span><span class="o">.</span><span class="na">isEmpty</span><span class="o">())</span> <span class="o">{</span>
+            <span class="n">exts</span><span class="o">.</span><span class="na">addAll</span><span class="o">(</span><span class="n">usrs</span><span class="o">);</span>
+        <span class="o">}</span>
+        <span class="k">return</span> <span class="n">exts</span><span class="o">;</span>
+    <span class="o">}</span>
+</code></pre></div></div>
+
+<p>该方法也是以 getExtension 为基础的。</p>
+
+<h2 id="35-extensionfactory-实现原理">3.5 ExtensionFactory 实现原理</h2>
+
+<p>ExtensionFactory 用于在 ExtensionLoader 注入依赖时获取实例是一个工厂类。</p>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nd">@SPI</span>
+<span class="kd">public</span> <span class="kd">interface</span> <span class="nc">ExtensionFactory</span> <span class="o">{</span>
+
+    <span class="cm">/**
+     * Get extension.
+     *
+     * @param type object type.
+     * @param name object name.
+     * @return object instance.
+     */</span>
+    <span class="o">&lt;</span><span class="no">T</span><span class="o">&gt;</span> <span class="no">T</span> <span class="nf">getExtension</span><span class="o">(</span><span class="nc">Class</span><span class="o">&lt;</span><span class="no">T</span><span class="o">&gt;</span> <span class="n">type</span><span class="o">,</span> <span class="nc">String</span> <span class="n">name</span><span class="o">);</span>
+
+<span class="o">}</span>
+</code></pre></div></div>
+
+<p>工厂类也是一个 SPI 类，其实现有：</p>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nd">@Adaptive</span>
+<span class="kd">public</span> <span class="kd">class</span> <span class="nc">AdaptiveExtensionFactory</span> <span class="kd">implements</span> <span class="nc">ExtensionFactory</span> <span class="o">{</span>
+
+    <span class="kd">private</span> <span class="kd">final</span> <span class="nc">List</span><span class="o">&lt;</span><span class="nc">ExtensionFactory</span><span class="o">&gt;</span> <span class="n">factories</span><span class="o">;</span>
+
+    <span class="kd">public</span> <span class="nf">AdaptiveExtensionFactory</span><span class="o">()</span> <span class="o">{</span>
+        <span class="c1">// 加载所有扩展点</span>
+        <span class="nc">ExtensionLoader</span><span class="o">&lt;</span><span class="nc">ExtensionFactory</span><span class="o">&gt;</span> <span class="n">loader</span> <span class="o">=</span> <span class="nc">ExtensionLoader</span><span class="o">.</span><span class="na">getExtensionLoader</span><span class="o">(</span><span class="nc">ExtensionFactory</span><span class="o">.</span><span class="na">class</span><span class="o">);</span>
+        <span class="nc">List</span><span class="o">&lt;</span><span class="nc">ExtensionFactory</span><span class="o">&gt;</span> <span class="n">list</span> <span class="o">=</span> <span class="k">new</span> <span class="nc">ArrayList</span><span class="o">&lt;</span><span class="nc">ExtensionFactory</span><span class="o">&gt;();</span>
+        <span class="c1">// 添加所有 ExtensionFactory 的扩展类实例</span>
+        <span class="k">for</span> <span class="o">(</span><span class="nc">String</span> <span class="n">name</span> <span class="o">:</span> <span class="n">loader</span><span class="o">.</span><span class="na">getSupportedExtensions</span><span class="o">())</span> <span class="o">{</span>
+            <span class="n">list</span><span class="o">.</span><span class="na">add</span><span class="o">(</span><span class="n">loader</span><span class="o">.</span><span class="na">getExtension</span><span class="o">(</span><span class="n">name</span><span class="o">));</span>
+        <span class="o">}</span>
+        <span class="n">factories</span> <span class="o">=</span> <span class="nc">Collections</span><span class="o">.</span><span class="na">unmodifiableList</span><span class="o">(</span><span class="n">list</span><span class="o">);</span>
+    <span class="o">}</span>
+
+    <span class="nd">@Override</span>
+    <span class="kd">public</span> <span class="o">&lt;</span><span class="no">T</span><span class="o">&gt;</span> <span class="no">T</span> <span class="nf">getExtension</span><span class="o">(</span><span class="nc">Class</span><span class="o">&lt;</span><span class="no">T</span><span class="o">&gt;</span> <span class="n">type</span><span class="o">,</span> <span class="nc">String</span> <span class="n">name</span><span class="o">)</span> <span class="o">{</span>
+        <span class="k">for</span> <span class="o">(</span><span class="nc">ExtensionFactory</span> <span class="n">factory</span> <span class="o">:</span> <span class="n">factories</span><span class="o">)</span> <span class="o">{</span>
+            <span class="no">T</span> <span class="n">extension</span> <span class="o">=</span> <span class="n">factory</span><span class="o">.</span><span class="na">getExtension</span><span class="o">(</span><span class="n">type</span><span class="o">,</span> <span class="n">name</span><span class="o">);</span>
+            <span class="k">if</span> <span class="o">(</span><span class="n">extension</span> <span class="o">!=</span> <span class="kc">null</span><span class="o">)</span> <span class="o">{</span>
+                <span class="k">return</span> <span class="n">extension</span><span class="o">;</span>
+            <span class="o">}</span>
+        <span class="o">}</span>
+        <span class="k">return</span> <span class="kc">null</span><span class="o">;</span>
+    <span class="o">}</span>
+
+<span class="o">}</span>
+</code></pre></div></div>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kd">public</span> <span class="kd">class</span> <span class="nc">SpiExtensionFactory</span> <span class="kd">implements</span> <span class="nc">ExtensionFactory</span> <span class="o">{</span>
+
+    <span class="nd">@Override</span>
+    <span class="kd">public</span> <span class="o">&lt;</span><span class="no">T</span><span class="o">&gt;</span> <span class="no">T</span> <span class="nf">getExtension</span><span class="o">(</span><span class="nc">Class</span><span class="o">&lt;</span><span class="no">T</span><span class="o">&gt;</span> <span class="n">type</span><span class="o">,</span> <span class="nc">String</span> <span class="n">name</span><span class="o">)</span> <span class="o">{</span>
+        <span class="k">if</span> <span class="o">(</span><span class="n">type</span><span class="o">.</span><span class="na">isInterface</span><span class="o">()</span> <span class="o">&amp;&amp;</span> <span class="n">type</span><span class="o">.</span><span class="na">isAnnotationPresent</span><span class="o">(</span><span class="no">SPI</span><span class="o">.</span><span class="na">class</span><span class="o">))</span> <span class="o">{</span>
+            <span class="nc">ExtensionLoader</span><span class="o">&lt;</span><span class="no">T</span><span class="o">&gt;</span> <span class="n">loader</span> <span class="o">=</span> <span class="nc">ExtensionLoader</span><span class="o">.</span><span class="na">getExtensionLoader</span><span class="o">(</span><span class="n">type</span><span class="o">);</span>
+            <span class="k">if</span> <span class="o">(!</span><span class="n">loader</span><span class="o">.</span><span class="na">getSupportedExtensions</span><span class="o">().</span><span class="na">isEmpty</span><span class="o">())</span> <span class="o">{</span>
+                <span class="k">return</span> <span class="n">loader</span><span class="o">.</span><span class="na">getAdaptiveExtension</span><span class="o">();</span>
+            <span class="o">}</span>
+        <span class="o">}</span>
+        <span class="k">return</span> <span class="kc">null</span><span class="o">;</span>
+    <span class="o">}</span>
+
+<span class="o">}</span>
+</code></pre></div></div>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kd">public</span> <span class="kd">class</span> <span class="nc">SpringExtensionFactory</span> <span class="kd">implements</span> <span class="nc">ExtensionFactory</span> <span class="o">{</span>
+    <span class="kd">private</span> <span class="kd">static</span> <span class="kd">final</span> <span class="nc">Logger</span> <span class="n">logger</span> <span class="o">=</span> <span class="nc">LoggerFactory</span><span class="o">.</span><span class="na">getLogger</span><span class="o">(</span><span class="nc">SpringExtensionFactory</span><span class="o">.</span><span class="na">class</span><span class="o">);</span>
+
+    <span class="kd">private</span> <span class="kd">static</span> <span class="kd">final</span> <span class="nc">Set</span><span class="o">&lt;</span><span class="nc">ApplicationContext</span><span class="o">&gt;</span> <span class="no">CONTEXTS</span> <span class="o">=</span> <span class="k">new</span> <span class="nc">ConcurrentHashSet</span><span class="o">&lt;</span><span class="nc">ApplicationContext</span><span class="o">&gt;();</span>
+
+    <span class="kd">public</span> <span class="kd">static</span> <span class="kt">void</span> <span class="nf">addApplicationContext</span><span class="o">(</span><span class="nc">ApplicationContext</span> <span class="n">context</span><span class="o">)</span> <span class="o">{</span>
+        <span class="no">CONTEXTS</span><span class="o">.</span><span class="na">add</span><span class="o">(</span><span class="n">context</span><span class="o">);</span>
+        <span class="k">if</span> <span class="o">(</span><span class="n">context</span> <span class="k">instanceof</span> <span class="nc">ConfigurableApplicationContext</span><span class="o">)</span> <span class="o">{</span>
+            <span class="o">((</span><span class="nc">ConfigurableApplicationContext</span><span class="o">)</span> <span class="n">context</span><span class="o">).</span><span class="na">registerShutdownHook</span><span class="o">();</span>
+        <span class="o">}</span>
+    <span class="o">}</span>
+
+    <span class="kd">public</span> <span class="kd">static</span> <span class="kt">void</span> <span class="nf">removeApplicationContext</span><span class="o">(</span><span class="nc">ApplicationContext</span> <span class="n">context</span><span class="o">)</span> <span class="o">{</span>
+        <span class="no">CONTEXTS</span><span class="o">.</span><span class="na">remove</span><span class="o">(</span><span class="n">context</span><span class="o">);</span>
+    <span class="o">}</span>
+
+    <span class="kd">public</span> <span class="kd">static</span> <span class="nc">Set</span><span class="o">&lt;</span><span class="nc">ApplicationContext</span><span class="o">&gt;</span> <span class="nf">getContexts</span><span class="o">()</span> <span class="o">{</span>
+        <span class="k">return</span> <span class="no">CONTEXTS</span><span class="o">;</span>
+    <span class="o">}</span>
+
+    <span class="c1">// currently for test purpose</span>
+    <span class="kd">public</span> <span class="kd">static</span> <span class="kt">void</span> <span class="nf">clearContexts</span><span class="o">()</span> <span class="o">{</span>
+        <span class="no">CONTEXTS</span><span class="o">.</span><span class="na">clear</span><span class="o">();</span>
+    <span class="o">}</span>
+
+    <span class="nd">@Override</span>
+    <span class="nd">@SuppressWarnings</span><span class="o">(</span><span class="s">"unchecked"</span><span class="o">)</span>
+    <span class="kd">public</span> <span class="o">&lt;</span><span class="no">T</span><span class="o">&gt;</span> <span class="no">T</span> <span class="nf">getExtension</span><span class="o">(</span><span class="nc">Class</span><span class="o">&lt;</span><span class="no">T</span><span class="o">&gt;</span> <span class="n">type</span><span class="o">,</span> <span class="nc">String</span> <span class="n">name</span><span class="o">)</span> <span class="o">{</span>
+        <span class="c1">// 带有 SPI 注解的接口，要使用 SpiExtensionFactory 获取扩展类实例</span>
+        <span class="c1">//SPI should be get from SpiExtensionFactory</span>
+        <span class="k">if</span> <span class="o">(</span><span class="n">type</span><span class="o">.</span><span class="na">isInterface</span><span class="o">()</span> <span class="o">&amp;&amp;</span> <span class="n">type</span><span class="o">.</span><span class="na">isAnnotationPresent</span><span class="o">(</span><span class="no">SPI</span><span class="o">.</span><span class="na">class</span><span class="o">))</span> <span class="o">{</span>
+            <span class="k">return</span> <span class="kc">null</span><span class="o">;</span>
+        <span class="o">}</span>
+        <span class="c1">// 根据实例 name 和 类型，从 Spring 容器获取实例</span>
+        <span class="k">for</span> <span class="o">(</span><span class="nc">ApplicationContext</span> <span class="n">context</span> <span class="o">:</span> <span class="no">CONTEXTS</span><span class="o">)</span> <span class="o">{</span>
+            <span class="no">T</span> <span class="n">bean</span> <span class="o">=</span> <span class="nc">BeanFactoryUtils</span><span class="o">.</span><span class="na">getOptionalBean</span><span class="o">(</span><span class="n">context</span><span class="o">,</span> <span class="n">name</span><span class="o">,</span> <span class="n">type</span><span class="o">);</span>
+            <span class="k">if</span> <span class="o">(</span><span class="n">bean</span> <span class="o">!=</span> <span class="kc">null</span><span class="o">)</span> <span class="o">{</span>
+                <span class="k">return</span> <span class="n">bean</span><span class="o">;</span>
+            <span class="o">}</span>
+        <span class="o">}</span>
+
+        <span class="n">logger</span><span class="o">.</span><span class="na">warn</span><span class="o">(</span><span class="s">"No spring extension (bean) named:"</span> <span class="o">+</span> <span class="n">name</span> <span class="o">+</span> <span class="s">", try to find an extension (bean) of type "</span> <span class="o">+</span> <span class="n">type</span><span class="o">.</span><span class="na">getName</span><span class="o">());</span>
+
+        <span class="k">return</span> <span class="kc">null</span><span class="o">;</span>
+    <span class="o">}</span>
+<span class="o">}</span>
+</code></pre></div></div>
+
+<p>AdaptiveExtensionFactory 上有 @Adaptive 注解。因此，它是一开始的默认实现。除了该实现之外，还有 SpiExtensionFactory 和 SpringExtensionFactory。意思是除了可以从 Dubbo SPI 管理的容器获取扩展类实例，还可以从 Spring 容器获取。</p>
+
+<p>AdaptiveExtensionFactory 是默认实现，在构造器中添加了所有的 ExtensionFactory 实例，在使用 ExtensionFactory 时，还是使用的 AdaptiveExtensionFactory 的 getExtension 方法，遍历所有实现依次加载，是有序的，为先 SPI 再 Spring，结合其他 ExtensionFactory 实现看，带有 @SPI 的接口是只使用 SpiExtensionFactory 加载的，如果不是，先 SPI 再 Spring。</p>
+
+<h1 id="四扩展点动态编译的实现">四、扩展点动态编译的实现</h1>
+
+<p>Dubbo SPI 的自适应特性让整个框架非常灵活，动态编译是自适应特性的基础，Dubbo 生成自适应类是拼接类的字符串，是需要进行编译才能变成 Class 的。虽然反射可以动态代理一个类，但在性能上和直接编译好的 Class 会有一定差距。Dubbo SPI 通过动态生成代码，配合动态编译器，灵活创建自适应类。本节介绍 Dubbo SPI 动态编译器的种类以及对应实现原理。</p>
+
+<h2 id="41-总体结构">4.1 总体结构</h2>
+
+<p>Dubbo 编译器接口为 Compiler：</p>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="cm">/**
+ * Compiler. (SPI, Singleton, ThreadSafe)
+ */</span>
+<span class="nd">@SPI</span><span class="o">(</span><span class="s">"javassist"</span><span class="o">)</span>
+<span class="kd">public</span> <span class="kd">interface</span> <span class="nc">Compiler</span> <span class="o">{</span>
+
+    <span class="cm">/**
+     * Compile java source code.
+     *
+     * @param code        Java source code
+     * @param classLoader classloader
+     * @return Compiled class
+     */</span>
+    <span class="nc">Class</span><span class="o">&lt;?&gt;</span> <span class="n">compile</span><span class="o">(</span><span class="nc">String</span> <span class="n">code</span><span class="o">,</span> <span class="nc">ClassLoader</span> <span class="n">classLoader</span><span class="o">);</span>
+
+<span class="o">}</span>
+</code></pre></div></div>
+
+<p>可以发现是 @SPI 注解，可扩展的，默认编译器是 javassist，单例且线程安全。</p>
+
+<blockquote>
+  <p>用户若想改变默认编译器，可以通过 <code class="language-plaintext highlighter-rouge">&lt;dubbo:application compiler="jdk"/&gt;</code>配置。</p>
+</blockquote>
+
+<p>其实现类有 AdaptiveCompiler、JavassistCompiler、JdkCompiler。</p>
+
+<p>AdaptiveCompiler 和 AdaptiveExtensionFactory 同理，类上标注了 @Adaptive 注解，固定为默认实现，用于管理其他的 Compiler 实现。</p>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nd">@Adaptive</span>
+<span class="kd">public</span> <span class="kd">class</span> <span class="nc">AdaptiveCompiler</span> <span class="kd">implements</span> <span class="nc">Compiler</span> <span class="o">{</span>
+
+    <span class="kd">private</span> <span class="kd">static</span> <span class="kd">volatile</span> <span class="nc">String</span> <span class="no">DEFAULT_COMPILER</span><span class="o">;</span>
+	<span class="c1">// set 方法在 ApplicationConfig 中被调用，dubbo 启动时解析配置中的标签设置默认值。</span>
+    <span class="kd">public</span> <span class="kd">static</span> <span class="kt">void</span> <span class="nf">setDefaultCompiler</span><span class="o">(</span><span class="nc">String</span> <span class="n">compiler</span><span class="o">)</span> <span class="o">{</span>
+        <span class="no">DEFAULT_COMPILER</span> <span class="o">=</span> <span class="n">compiler</span><span class="o">;</span>
+    <span class="o">}</span>
+
+    <span class="nd">@Override</span>
+    <span class="kd">public</span> <span class="nc">Class</span><span class="o">&lt;?&gt;</span> <span class="n">compile</span><span class="o">(</span><span class="nc">String</span> <span class="n">code</span><span class="o">,</span> <span class="nc">ClassLoader</span> <span class="n">classLoader</span><span class="o">)</span> <span class="o">{</span>
+        <span class="nc">Compiler</span> <span class="n">compiler</span><span class="o">;</span>
+        <span class="c1">// 获取 loader</span>
+        <span class="nc">ExtensionLoader</span><span class="o">&lt;</span><span class="nc">Compiler</span><span class="o">&gt;</span> <span class="n">loader</span> <span class="o">=</span> <span class="nc">ExtensionLoader</span><span class="o">.</span><span class="na">getExtensionLoader</span><span class="o">(</span><span class="nc">Compiler</span><span class="o">.</span><span class="na">class</span><span class="o">);</span>
+        <span class="nc">String</span> <span class="n">name</span> <span class="o">=</span> <span class="no">DEFAULT_COMPILER</span><span class="o">;</span> <span class="c1">// copy reference</span>
+        <span class="k">if</span> <span class="o">(</span><span class="n">name</span> <span class="o">!=</span> <span class="kc">null</span> <span class="o">&amp;&amp;</span> <span class="n">name</span><span class="o">.</span><span class="na">length</span><span class="o">()</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="o">)</span> <span class="o">{</span>
+            <span class="n">compiler</span> <span class="o">=</span> <span class="n">loader</span><span class="o">.</span><span class="na">getExtension</span><span class="o">(</span><span class="n">name</span><span class="o">);</span>
+        <span class="o">}</span> <span class="k">else</span> <span class="o">{</span>
+            <span class="c1">// ExtensionLoader 加载的默认实现为 @SPI 上注解的，即 Javassist</span>
+            <span class="n">compiler</span> <span class="o">=</span> <span class="n">loader</span><span class="o">.</span><span class="na">getDefaultExtension</span><span class="o">();</span>
+        <span class="o">}</span>
+        <span class="k">return</span> <span class="n">compiler</span><span class="o">.</span><span class="na">compile</span><span class="o">(</span><span class="n">code</span><span class="o">,</span> <span class="n">classLoader</span><span class="o">);</span>
+    <span class="o">}</span>
+
+<span class="o">}</span>
+</code></pre></div></div>
+
+<h2 id="42-javassist-动态代码编译">4.2 Javassist 动态代码编译</h2>
+
+<p>Java 中动态生成 Class 的方式有很多，可以直接基于字节码方式生成，常见的有 CGLIB、ASM、Javassist 等。自适应扩展点使用了生成字符串代码再编译成 Class 的方式。</p>
+
+<p>使用示例：</p>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">// 初始化类池</span>
+        <span class="nc">ClassPool</span> <span class="n">classPool</span> <span class="o">=</span> <span class="nc">ClassPool</span><span class="o">.</span><span class="na">getDefault</span><span class="o">();</span>
+        <span class="c1">// 创建类</span>
+        <span class="nc">CtClass</span> <span class="n">ctClass</span> <span class="o">=</span> <span class="n">classPool</span><span class="o">.</span><span class="na">makeClass</span><span class="o">(</span><span class="s">"Hello World"</span><span class="o">);</span>
+        <span class="c1">// 创建方法</span>
+        <span class="nc">CtMethod</span> <span class="n">ctMethod</span> <span class="o">=</span> <span class="nc">CtNewMethod</span><span class="o">.</span><span class="na">make</span><span class="o">(</span><span class="s">"public static void test() {System.out.println(\"Hello World\");}"</span><span class="o">,</span> <span class="n">ctClass</span><span class="o">);</span>
+        <span class="c1">// 添加方法</span>
+        <span class="n">ctClass</span><span class="o">.</span><span class="na">addMethod</span><span class="o">(</span><span class="n">ctMethod</span><span class="o">);</span>
+        <span class="c1">// 生成类</span>
+        <span class="nc">Class</span> <span class="n">aClass</span> <span class="o">=</span> <span class="n">ctClass</span><span class="o">.</span><span class="na">toClass</span><span class="o">();</span>
+        <span class="c1">// 反射调用实例的 test 方法</span>
+        <span class="nc">Object</span> <span class="n">instance</span> <span class="o">=</span> <span class="n">aClass</span><span class="o">.</span><span class="na">newInstance</span><span class="o">();</span>
+        <span class="nc">Method</span> <span class="n">m</span> <span class="o">=</span> <span class="n">aClass</span><span class="o">.</span><span class="na">getDeclaredMethod</span><span class="o">(</span><span class="s">"test"</span><span class="o">,</span> <span class="kc">null</span><span class="o">);</span>
+        <span class="n">m</span><span class="o">.</span><span class="na">invoke</span><span class="o">(</span><span class="n">instance</span><span class="o">,</span> <span class="kc">null</span><span class="o">);</span>
+</code></pre></div></div>
+
+<p>Dubbo，JavassistCompiler 通过不断正则匹配不同部位的代码，最终生成类。</p>
+
+<h2 id="43-jdk-动态代码编译">4.3 JDK 动态代码编译</h2>
+
+<p>为 Dubbo 编译器另一种实现，是 JDK 原生编译器，包位于 javax.tools 下。</p>
+
+<p>详略。</p>
+
+<h1 id="小结">小结</h1>
+
+<p>本章介绍了 Dubbo SPI 与 Java SPI 区别，Dubbo SPI 的特性、配置规范和内部缓存等。其次介绍了最重要的3个注解 @SPI、@Adaptive、@Activate 的作用及原理。然后分析了 ExtensionLoader 的源码，以及 ExtensionFactory 原理。最后讲解了自适应动态编译的实现原理。</p>
+
+:ET

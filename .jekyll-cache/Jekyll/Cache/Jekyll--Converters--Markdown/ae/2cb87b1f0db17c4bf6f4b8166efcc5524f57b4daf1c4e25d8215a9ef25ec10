@@ -1,0 +1,173 @@
+I"�C<p>AQS 是并发包的基石。AQS 是一个抽象类，必须要继承才能使用。<code class="language-plaintext highlighter-rouge">ReentrantLock</code>、<code class="language-plaintext highlighter-rouge">ReentrantReadWriteLock</code>，<code class="language-plaintext highlighter-rouge">Semaphore</code>这些并发工具都是依赖 AQS 实现（内部类继承 AQS ）的。</p>
+
+<p>AQS内部通过一个FIFO队列管理线程的同步，队列里的节点即是被包装的线程。</p>
+
+<p><img src="/assets/img/633531-20190115234643185-659400767.jpg" alt="此处输入图片的描述" /></p>
+
+<p>本文暂时只讲独占模式。</p>
+
+<h2 id="继承情况">继承情况</h2>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kd">public</span> <span class="kd">abstract</span> <span class="kd">class</span> <span class="nc">AbstractOwnableSynchronizer</span>
+    <span class="kd">implements</span> <span class="n">java</span><span class="o">.</span><span class="na">io</span><span class="o">.</span><span class="na">Serializable</span> <span class="o">{</span>
+    
+    <span class="kd">private</span> <span class="kd">static</span> <span class="kd">final</span> <span class="kt">long</span> <span class="n">serialVersionUID</span> <span class="o">=</span> <span class="mi">3737899427754241961L</span><span class="o">;</span>
+    <span class="kd">protected</span> <span class="nf">AbstractOwnableSynchronizer</span><span class="o">()</span> <span class="o">{</span> <span class="o">}</span>
+    <span class="kd">private</span> <span class="kd">transient</span> <span class="nc">Thread</span> <span class="n">exclusiveOwnerThread</span><span class="o">;</span>
+    
+    <span class="kd">protected</span> <span class="kd">final</span> <span class="kt">void</span> <span class="nf">setExclusiveOwnerThread</span><span class="o">(</span><span class="nc">Thread</span> <span class="n">thread</span><span class="o">)</span> <span class="o">{</span>
+        <span class="n">exclusiveOwnerThread</span> <span class="o">=</span> <span class="n">thread</span><span class="o">;</span>
+    <span class="o">}</span>
+    
+    <span class="kd">protected</span> <span class="kd">final</span> <span class="nc">Thread</span> <span class="nf">getExclusiveOwnerThread</span><span class="o">()</span> <span class="o">{</span>
+        <span class="k">return</span> <span class="n">exclusiveOwnerThread</span><span class="o">;</span>
+    <span class="o">}</span>
+<span class="o">}</span>
+</code></pre></div></div>
+
+<p>AQS 继承 <code class="language-plaintext highlighter-rouge">AbstractOwnableSynchronizer</code>，是用于互斥同步的同步器，仅有<code class="language-plaintext highlighter-rouge">exclusiveOwnerThread</code>一个成员变量，表明当前拥有独占访问的线程。</p>
+
+<p>可以看到get 和 set 方法都是 final 的，无法被重写。而且该成员变量没有使用<code class="language-plaintext highlighter-rouge">volitile</code>，其方法也没有做额外的同步，继承类使用时要自己注意。</p>
+
+<h2 id="内部类">内部类</h2>
+
+<p><code class="language-plaintext highlighter-rouge">Node</code>：Node即是上图等待队列中的节点。</p>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">// AQS 的等待队列是 CLH 队列的变种，CLH 锁通常用于自旋锁。</span>
+<span class="c1">// 虽然 AQS 是用来做阻塞同步器的，但使用了相同的策略：关于控制该节点状态的值都是在前一个节点持有（waitStatus）。</span>
+<span class="c1">// 这里可以先记住，Node 点里 waitStatus并不是代表自己的，而是其后继节点的。</span>
+<span class="c1">// 当一个节点的前置节点释放时，该节点会被signal。等待队列的每个节点都持有一个等待线程，作为一种</span>
+<span class="c1">// 特殊通知形式的监视器。waitStatus并不控制线程是否被授予锁。</span>
+<span class="c1">// 队列里第一个节点的线程，可能尝试获取锁。但是第一个节点并不保证成功获取锁。只是有尝试获取的权利。</span>
+<span class="c1">// 当前被释放的竞争线程可能需要重新等待。</span>
+
+<span class="c1">// CLH的入队，只需要原子性地把节点拼接到 tail。出队只需要 set head。</span>
+<span class="c1">//   *      +------+  prev +-----+       +-----+</span>
+<span class="c1">//   * head |      | &lt;---- |     | &lt;---- |     |  tail</span>
+<span class="c1">//   *      +------+       +-----+       +-----+</span>
+
+<span class="c1">// CLH 入队只需要在 tail 做一次原子操作，因此从没入队到入队有一个简单的原子分界点。</span>
+<span class="c1">// 相似的，CLH 出队只需要更新 head。然而，决定其后继几点可能更花时间，部分原因是处理由于和中断和超时导致的取消。</span>
+<span class="c1">// “prev"，指Node的prev引用，在原始的CLH锁里是没有的，在 AQS 里主要用于取消操作。如果一个Node被取消了，它的后继节点通常会重连到一个没有被取消的节点上。</span>
+
+<span class="c1">// "next", Node 的 next 引用，用于实现阻塞机制。前置节点唤醒后继节点，就是通过遍历 next。</span>
+<span class="c1">// 决定后继节点，必须避免新入队的节点 set 前置节点的 next 所发生的竞争。这是通过当一个节点的后继节点为空时，必要时从原子更新的tail向后检查实现的。</span>
+
+<span class="c1">// 取消引入了一些保守的算法。因为我们必须轮询其他节点的取消，可能会忽略被取消的节点是在前在后。我们通过取消时总是 unparking 后继节点解决，使被取消的后继节点稳定在一个新的前置节点上。</span>
+
+<span class="c1">// CLH 需要一个虚拟的 head 启动。但我们不会在构造时创造 head，因为如果永远没有竞争的话，是浪费。AQS 是在第一次竞争时才会 构造Node，并设置 head和tail的指针。</span>
+
+<span class="c1">// 在 Conditions 上等待的线程，使用的是相同的nodes，但使用了一个额外的link（nextWaiter）。Conditions 只需要在简单的无并发队列里 link 节点，因为只在独占时被访问。</span>
+<span class="c1">// 等待时，Node 被插入到一个 Condition 队列。Signal 时，节点被转移到主队列。一个特殊的 status field 的值标记 node 在哪个队列（）。</span>
+
+<span class="kd">static</span> <span class="kd">final</span> <span class="kd">class</span> <span class="nc">Node</span> <span class="o">{</span>
+    	<span class="c1">// 节点是共享模式的标识 （共享模式的队列）</span>
+        <span class="kd">static</span> <span class="kd">final</span> <span class="nc">Node</span> <span class="no">SHARED</span> <span class="o">=</span> <span class="k">new</span> <span class="nc">Node</span><span class="o">();</span>
+        <span class="c1">// 节点是独占模式的标识</span>
+        <span class="kd">static</span> <span class="kd">final</span> <span class="nc">Node</span> <span class="no">EXCLUSIVE</span> <span class="o">=</span> <span class="kc">null</span><span class="o">;</span>
+
+        <span class="c1">// waitStatus的值  此线程取消了获取锁</span>
+        <span class="kd">static</span> <span class="kd">final</span> <span class="kt">int</span> <span class="no">CANCELLED</span> <span class="o">=</span>  <span class="mi">1</span><span class="o">;</span>
+        <span class="c1">// waitStatus的值 标识后继节点的线程需要 unparking（唤醒）</span>
+        <span class="kd">static</span> <span class="kd">final</span> <span class="kt">int</span> <span class="no">SIGNAL</span>    <span class="o">=</span> <span class="o">-</span><span class="mi">1</span><span class="o">;</span>
+        <span class="c1">// waitStatus的值 标识当前节点在 Condition 上 wait</span>
+        <span class="kd">static</span> <span class="kd">final</span> <span class="kt">int</span> <span class="no">CONDITION</span> <span class="o">=</span> <span class="o">-</span><span class="mi">2</span><span class="o">;</span>
+        <span class="cm">/**
+         * waitStatus value to indicate the next acquireShared should
+         * unconditionally propagate
+         */</span>
+    	<span class="c1">// waitStatus的值 标识下一个 acquireShared 应该无条件传播</span>
+        <span class="kd">static</span> <span class="kd">final</span> <span class="kt">int</span> <span class="no">PROPAGATE</span> <span class="o">=</span> <span class="o">-</span><span class="mi">3</span><span class="o">;</span>
+
+        <span class="cm">/**
+         * waitStatus 的值，除上面4个外，还有0。
+         *   SIGNAL:    当前节点的后继节点被阻塞了（通过park），所以当前节点释放或取消时必须 unpark 后继节点。
+         *              为避免竞争，acquire 方法必须首先表明他们需要一个 signal，然后重试原子的 acquire，失败就阻塞住。
+         *   CANCELLED: 当前节点因为超时或者中断被取消了抢锁。一个 CANCELLED 状态的线程永远不会再次阻塞。
+         *   CONDITION: 当前节点当前处于一个 Condition 队列（处于共享模式）。
+         *   PROPAGATE: 一个 releaseShared 应该被传播到其他 nodes。在 doReleaseShared 时 head节点被设置为这个状态确保传播继续，即使其他操作干预了。
+         *   0:         普通的同步 node（非 Condition ）的初始状态
+         */</span>
+        <span class="kd">volatile</span> <span class="kt">int</span> <span class="n">waitStatus</span><span class="o">;</span>
+
+        <span class="c1">// 前置节点的引用。</span>
+        <span class="c1">// 当前的节点，也就是线程，需要 check 其 prev 的 waitStatus 。</span>
+        <span class="c1">// 在当前节点入队时被赋值，出队时置null（for GC）。</span>
+        <span class="c1">// 在前置节点取消时，我们通过一个简短的 while 循环找到一个没有被取消的节点。这个节点是总是存在的，</span>
+        <span class="c1">// 因为 head 永远不会被取消：一个 node 能成为 head 肯定是 acquire 成功了。 </span>
+        <span class="c1">// 一个被取消的线程永远不会在 acquire 时成功，并且线程只能取消自己，不能取消别的 node。    </span>
+        <span class="kd">volatile</span> <span class="nc">Node</span> <span class="n">prev</span><span class="o">;</span>
+
+        <span class="c1">// 后继节点的引用。当前节点 release 时，要 unpark next节点。</span>
+        <span class="c1">// 当前节点入队时赋值，由于取消，该值会被改变，出队时置null（for GC）</span>
+        <span class="c1">// 入队操作在连接完成前不给前置节点的 next 赋值，所以没必要认为 next 为null的就是在队尾。</span>
+        <span class="c1">// 然而，如果出现了 next 为空，我们可以从 tail 开始检查 prev 来 double-check</span>
+        <span class="c1">// 取消节点的 next 指向 node 自身而不是 null， 使 isOnSyncQueue 方法更简单。</span>
+        <span class="kd">volatile</span> <span class="nc">Node</span> <span class="n">next</span><span class="o">;</span>
+        <span class="kd">volatile</span> <span class="nc">Node</span> <span class="n">next</span><span class="o">;</span>
+
+        <span class="c1">// 当前节点的线程。</span>
+        <span class="kd">volatile</span> <span class="nc">Thread</span> <span class="n">thread</span><span class="o">;</span>
+
+        <span class="c1">// 在 condition 上等待的 next node 或者 特殊值 SHARED 的引用。</span>
+        <span class="c1">// 因为 condition 队列仅在独占模式被访问，只需要一个简单的队列即可。</span>
+        <span class="c1">// 在 condition 等待队列的 nodes 随后被转移到主队列重新 acquire。</span>
+        <span class="c1">// 因为 condition 只能是排它的，我们用 SHARED 这个特殊值标识是在共享模式。</span>
+        <span class="nc">Node</span> <span class="n">nextWaiter</span><span class="o">;</span>
+
+        <span class="c1">// 当前 Node 是不是共享模式</span>
+        <span class="kd">final</span> <span class="kt">boolean</span> <span class="nf">isShared</span><span class="o">()</span> <span class="o">{</span>
+            <span class="k">return</span> <span class="n">nextWaiter</span> <span class="o">==</span> <span class="no">SHARED</span><span class="o">;</span>
+        <span class="o">}</span>
+
+        <span class="c1">// 返回 prev 节点，如果是null，抛出 NullPointerException</span>
+        <span class="c1">// 在 prev 不为 null 时使用。 null-check 可以省略，但有利于GC</span>
+        <span class="kd">final</span> <span class="nc">Node</span> <span class="nf">predecessor</span><span class="o">()</span> <span class="kd">throws</span> <span class="nc">NullPointerException</span> <span class="o">{</span>
+            <span class="nc">Node</span> <span class="n">p</span> <span class="o">=</span> <span class="n">prev</span><span class="o">;</span>
+            <span class="k">if</span> <span class="o">(</span><span class="n">p</span> <span class="o">==</span> <span class="kc">null</span><span class="o">)</span>
+                <span class="k">throw</span> <span class="k">new</span> <span class="nf">NullPointerException</span><span class="o">();</span>
+            <span class="k">else</span>
+                <span class="k">return</span> <span class="n">p</span><span class="o">;</span>
+        <span class="o">}</span>
+	
+    	<span class="c1">// 不同的地方使用的3个构造器</span>
+        <span class="nc">Node</span><span class="o">()</span> <span class="o">{</span>    <span class="c1">// Used to establish initial head or SHARED marker</span>
+        <span class="o">}</span>
+
+        <span class="nc">Node</span><span class="o">(</span><span class="nc">Thread</span> <span class="n">thread</span><span class="o">,</span> <span class="nc">Node</span> <span class="n">mode</span><span class="o">)</span> <span class="o">{</span>     <span class="c1">// Used by addWaiter</span>
+            <span class="k">this</span><span class="o">.</span><span class="na">nextWaiter</span> <span class="o">=</span> <span class="n">mode</span><span class="o">;</span>
+            <span class="k">this</span><span class="o">.</span><span class="na">thread</span> <span class="o">=</span> <span class="n">thread</span><span class="o">;</span>
+        <span class="o">}</span>
+
+        <span class="nc">Node</span><span class="o">(</span><span class="nc">Thread</span> <span class="n">thread</span><span class="o">,</span> <span class="kt">int</span> <span class="n">waitStatus</span><span class="o">)</span> <span class="o">{</span> <span class="c1">// Used by Condition</span>
+            <span class="k">this</span><span class="o">.</span><span class="na">waitStatus</span> <span class="o">=</span> <span class="n">waitStatus</span><span class="o">;</span>
+            <span class="k">this</span><span class="o">.</span><span class="na">thread</span> <span class="o">=</span> <span class="n">thread</span><span class="o">;</span>
+        <span class="o">}</span>
+    <span class="o">}</span>
+</code></pre></div></div>
+
+<p>AQS 是双向等待队列，是 CLH 队列的变种，<code class="language-plaintext highlighter-rouge">Node</code> 类是队列中的节点。类上的注释大多是 AQS 队列的设计思想，可以暂时先对 AQS 有了大致了解后再来理解。</p>
+
+<p><code class="language-plaintext highlighter-rouge">ConditionObject</code>，用于共享模式，暂时先不讲了。</p>
+
+<h2 id="field">Field</h2>
+
+<p>接来下看 AQS  的 Field</p>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code>	<span class="c1">// 等待队列的 head，懒加载。除了初始化之外，只能通过 setHead 方法更改。</span>
+    <span class="c1">// 要注意如果 head 存在，它的 waitStatus 保证不能为 CANCELLED 。</span>
+    <span class="kd">private</span> <span class="kd">transient</span> <span class="kd">volatile</span> <span class="nc">Node</span> <span class="n">head</span><span class="o">;</span>
+
+	<span class="c1">// 等待队列的tail，懒加载。只能通过 enq 添加新的等待 node 节点时更改。</span>
+    <span class="kd">private</span> <span class="kd">transient</span> <span class="kd">volatile</span> <span class="nc">Node</span> <span class="n">tail</span><span class="o">;</span>
+
+	<span class="c1">// AQS 本身的锁定状态。</span>
+    <span class="kd">private</span> <span class="kd">volatile</span> <span class="kt">int</span> <span class="n">state</span><span class="o">;</span>
+
+	<span class="c1">//继承自AbstractOwnableSynchronizer</span>
+	<span class="kd">private</span> <span class="kd">transient</span> <span class="nc">Thread</span> <span class="n">exclusiveOwnerThread</span><span class="o">;</span> 
+</code></pre></div></div>
+
+<h2 id="方法">方法</h2>
+
+:ET

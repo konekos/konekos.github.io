@@ -1,0 +1,2 @@
+I"�<p>项目使用 Tomcat8，某服务经常会重启后所有接口报错，WARN 日志如下：com.caucho.hessian.io.SerializerFactory.getDeserializer Hessian/Burlap:’XxDTO’ is an unknown class in null:java.lang.ClassNotFoundException: ‘XxDTO’，Http 接口经过统一异常处理后打印的 message 为 java.lang.ClassCastException: java.util.HashMap cannot be cast to ‘XxDTO’。</p>
+:ET

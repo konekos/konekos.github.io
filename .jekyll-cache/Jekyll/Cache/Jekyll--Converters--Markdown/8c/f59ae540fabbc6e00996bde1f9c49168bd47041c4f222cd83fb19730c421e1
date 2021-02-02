@@ -1,0 +1,70 @@
+I"�<script async="" defer="" src="https://buttons.github.io/buttons.js"></script>
+
+<p align="center">
+  <img src="https://deadbeef.me/paper-jekyll-theme/assets/paper-cover-photo.png" />
+  <p align="center">
+     A minimalistic Jekyll Theme
+     <br />
+     <br />
+     <a class="no-hov" href="https://travis-ci.org/mkchoi212/paper-jekyll-theme"><img src="https://travis-ci.org/mkchoi212/paper-jekyll-theme.svg?branch=master" /></a>
+     <a class="no-hov" href="https://raw.githubusercontent.com/mkchoi212/paper-jekyll-theme/master/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" /></a>
+     <br /><br />
+     <a class="github-button" href="https://github.com/mkchoi212/paper-jekyll-theme" data-size="large" data-show-count="true" aria-label="Star mkchoi212/paper-jekyll-theme on GitHub">Stars</a>
+  </p>
+</p>
+<p><br /></p>
+
+<p>Paper is a minimal Jekyll theme. Perfect for hosting your personal site, blog, or portfolio on GitHub or self-hosting on your own server. The styling is purposely minimalistic so that you can add your own flare to the website.</p>
+
+<p>I’m currently using this theme on my <a href="https://www.deadbeef.me">personal blog</a>.</p>
+
+<h2 id="features">Features</h2>
+<ul>
+  <li>Compatible with Jekyll 3.x and Github Pages</li>
+  <li>Live local reloading for faster development</li>
+  <li><strong>Responsive layout</strong> built-in</li>
+  <li>Supports Jekyll’s built-in Sass/SCSS preprocessor</li>
+  <li>Supports <strong>Google Analytics</strong></li>
+  <li>Supports <strong>Disqus</strong> for commenting</li>
+  <li>Minimum Dependencies</li>
+  <li>Rakefile for automation
+    <ul>
+      <li><code class="language-plaintext highlighter-rouge">rake check</code>    - Check links/html files of the generated site</li>
+      <li><code class="language-plaintext highlighter-rouge">rake clean</code>    - Clean up generated site</li>
+      <li><code class="language-plaintext highlighter-rouge">rake post</code>     - Begin a new post in <code class="language-plaintext highlighter-rouge">./_posts</code></li>
+      <li><code class="language-plaintext highlighter-rouge">rake preview</code>  - Preview with livereload on local machine</li>
+    </ul>
+  </li>
+</ul>
+
+<h2 id="usage">Usage</h2>
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>git clone https://github.com/mkchoi212/paper-jekyll-theme.git
+bundle install
+rake preview
+</code></pre></div></div>
+
+<p>Then, go to your favorite brower and type in the address <code class="language-plaintext highlighter-rouge">http://127.0.0.1:YOUR_PORT_NUM_HERE</code> to preview your website.</p>
+
+<h3 id="customization">Customization</h3>
+<p>To customize various details - title/description of the website, your SNS accout names, etc - edit the <code class="language-plaintext highlighter-rouge">_config.yml</code> file.</p>
+
+<h3 id="adding-posts">Adding posts</h3>
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>rake post title="A Title" [date="2012-02-09"] [tags=[tag1,tag2]] [category="category"]
+</code></pre></div></div>
+<p>This will create a markdown file in the default folder where all posts are stored in Jekyll; <code class="language-plaintext highlighter-rouge">_post</code>.</p>
+
+<p>If you wish to <strong>change the directory where posts are saved</strong>, go to the <code class="language-plaintext highlighter-rouge">Rakefile</code> and edit the <code class="language-plaintext highlighter-rouge">CONFIG = { 'posts': CUSTOM_PATH_HERE }</code>. This will allow <code class="language-plaintext highlighter-rouge">rake post</code> to know where to save the new posts to.</p>
+
+<p>The <strong>drafts</strong> you are working on can be saved in the <code class="language-plaintext highlighter-rouge">_drafts</code> directory. When you push your code to the server, files in this directory will NOT be included to the list o posts.</p>
+
+<h1 id="licnese">Licnese</h1>
+<p>The MIT License (MIT)</p>
+
+<p>Copyright (c) 2017 Mike JS. Choi</p>
+
+<p>Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the “Software”), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:</p>
+
+<p>The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.</p>
+
+<p>THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.</p>
+:ET

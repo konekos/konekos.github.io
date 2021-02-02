@@ -1,0 +1,163 @@
+I"�t<h2 id="背景">背景</h2>
+
+<p>公司微服务架构使用 Spring Cloud Alibaba，选择 Spring Cloud Gateway 作为网关。测试环境曾出现多次网关503。<code class="language-plaintext highlighter-rouge">jps</code>发现进程没有挂掉。日志发现异常。</p>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="mi">2020</span><span class="o">-</span><span class="mo">01</span><span class="o">-</span><span class="mi">10</span> <span class="mi">15</span><span class="o">:</span><span class="mi">49</span><span class="o">:</span><span class="mf">30.603</span> <span class="o">[</span><span class="n">reactor</span><span class="o">-</span><span class="n">http</span><span class="o">-</span><span class="n">nio</span><span class="o">-</span><span class="mi">4</span><span class="o">]</span> <span class="no">ERROR</span> <span class="o">[]</span>
+                <span class="n">reactor</span><span class="o">.</span><span class="na">netty</span><span class="o">.</span><span class="na">tcp</span><span class="o">.</span><span class="na">TcpServer</span><span class="o">.</span><span class="na">error</span><span class="o">:</span><span class="mi">319</span><span class="o">-[</span><span class="nl">id:</span> <span class="mh">0x97cd2198</span><span class="o">,</span> <span class="nl">L:</span><span class="o">/</span><span class="mf">127.0</span><span class="o">.</span><span class="mf">0.1</span><span class="o">:</span><span class="mi">20000</span> <span class="o">-</span> <span class="nl">R:</span><span class="o">/</span><span class="mf">127.0</span><span class="o">.</span><span class="mf">0.1</span><span class="o">:</span><span class="mi">51173</span><span class="o">]</span> <span class="n">onUncaughtException</span><span class="o">(</span><span class="nc">SimpleConnection</span><span class="o">{</span><span class="n">channel</span><span class="o">=[</span><span class="nl">id:</span> <span class="mh">0x97cd2198</span><span class="o">,</span> <span class="nl">L:</span><span class="o">/</span><span class="mf">127.0</span><span class="o">.</span><span class="mf">0.1</span><span class="o">:</span><span class="mi">20000</span> <span class="o">-</span> <span class="nl">R:</span><span class="o">/</span><span class="mf">127.0</span><span class="o">.</span><span class="mf">0.1</span><span class="o">:</span><span class="mi">51173</span><span class="o">]})</span>
+<span class="n">io</span><span class="o">.</span><span class="na">netty</span><span class="o">.</span><span class="na">util</span><span class="o">.</span><span class="na">internal</span><span class="o">.</span><span class="na">OutOfDirectMemoryError</span><span class="o">:</span> <span class="n">failed</span> <span class="n">to</span> <span class="n">allocate</span> <span class="mi">16777216</span> <span class="kt">byte</span><span class="o">(</span><span class="n">s</span><span class="o">)</span> <span class="n">of</span> <span class="n">direct</span> <span class="nf">memory</span> <span class="o">(</span><span class="nl">used:</span> <span class="mi">100663303</span><span class="o">,</span> <span class="nl">max:</span> <span class="mi">106954752</span><span class="o">)</span>
+	<span class="n">at</span> <span class="n">io</span><span class="o">.</span><span class="na">netty</span><span class="o">.</span><span class="na">util</span><span class="o">.</span><span class="na">internal</span><span class="o">.</span><span class="na">PlatformDependent</span><span class="o">.</span><span class="na">incrementMemoryCounter</span><span class="o">(</span><span class="nc">PlatformDependent</span><span class="o">.</span><span class="na">java</span><span class="o">:</span><span class="mi">667</span><span class="o">)</span>
+	<span class="n">at</span> <span class="n">io</span><span class="o">.</span><span class="na">netty</span><span class="o">.</span><span class="na">util</span><span class="o">.</span><span class="na">internal</span><span class="o">.</span><span class="na">PlatformDependent</span><span class="o">.</span><span class="na">allocateDirectNoCleaner</span><span class="o">(</span><span class="nc">PlatformDependent</span><span class="o">.</span><span class="na">java</span><span class="o">:</span><span class="mi">622</span><span class="o">)</span>
+	<span class="n">at</span> <span class="n">io</span><span class="o">.</span><span class="na">netty</span><span class="o">.</span><span class="na">buffer</span><span class="o">.</span><span class="na">PoolArena</span><span class="n">$DirectArena</span><span class="o">.</span><span class="na">allocateDirect</span><span class="o">(</span><span class="nc">PoolArena</span><span class="o">.</span><span class="na">java</span><span class="o">:</span><span class="mi">772</span><span class="o">)</span>
+	<span class="n">at</span> <span class="n">io</span><span class="o">.</span><span class="na">netty</span><span class="o">.</span><span class="na">buffer</span><span class="o">.</span><span class="na">PoolArena</span><span class="n">$DirectArena</span><span class="o">.</span><span class="na">newChunk</span><span class="o">(</span><span class="nc">PoolArena</span><span class="o">.</span><span class="na">java</span><span class="o">:</span><span class="mi">748</span><span class="o">)</span>
+	<span class="n">at</span> <span class="n">io</span><span class="o">.</span><span class="na">netty</span><span class="o">.</span><span class="na">buffer</span><span class="o">.</span><span class="na">PoolArena</span><span class="o">.</span><span class="na">allocateNormal</span><span class="o">(</span><span class="nc">PoolArena</span><span class="o">.</span><span class="na">java</span><span class="o">:</span><span class="mi">245</span><span class="o">)</span>
+	<span class="n">at</span> <span class="n">io</span><span class="o">.</span><span class="na">netty</span><span class="o">.</span><span class="na">buffer</span><span class="o">.</span><span class="na">PoolArena</span><span class="o">.</span><span class="na">allocate</span><span class="o">(</span><span class="nc">PoolArena</span><span class="o">.</span><span class="na">java</span><span class="o">:</span><span class="mi">215</span><span class="o">)</span>
+	<span class="n">at</span> <span class="n">io</span><span class="o">.</span><span class="na">netty</span><span class="o">.</span><span class="na">buffer</span><span class="o">.</span><span class="na">PoolArena</span><span class="o">.</span><span class="na">allocate</span><span class="o">(</span><span class="nc">PoolArena</span><span class="o">.</span><span class="na">java</span><span class="o">:</span><span class="mi">147</span><span class="o">)</span>
+	<span class="n">at</span> <span class="n">io</span><span class="o">.</span><span class="na">netty</span><span class="o">.</span><span class="na">buffer</span><span class="o">.</span><span class="na">PooledByteBufAllocator</span><span class="o">.</span><span class="na">newDirectBuffer</span><span class="o">(</span><span class="nc">PooledByteBufAllocator</span><span class="o">.</span><span class="na">java</span><span class="o">:</span><span class="mi">342</span><span class="o">)</span>
+	<span class="n">at</span> <span class="n">io</span><span class="o">.</span><span class="na">netty</span><span class="o">.</span><span class="na">buffer</span><span class="o">.</span><span class="na">AbstractByteBufAllocator</span><span class="o">.</span><span class="na">directBuffer</span><span class="o">(</span><span class="nc">AbstractByteBufAllocator</span><span class="o">.</span><span class="na">java</span><span class="o">:</span><span class="mi">187</span><span class="o">)</span>
+	<span class="n">at</span> <span class="n">io</span><span class="o">.</span><span class="na">netty</span><span class="o">.</span><span class="na">buffer</span><span class="o">.</span><span class="na">AbstractByteBufAllocator</span><span class="o">.</span><span class="na">directBuffer</span><span class="o">(</span><span class="nc">AbstractByteBufAllocator</span><span class="o">.</span><span class="na">java</span><span class="o">:</span><span class="mi">178</span><span class="o">)</span>
+	<span class="n">at</span> <span class="n">io</span><span class="o">.</span><span class="na">netty</span><span class="o">.</span><span class="na">buffer</span><span class="o">.</span><span class="na">AbstractByteBufAllocator</span><span class="o">.</span><span class="na">ioBuffer</span><span class="o">(</span><span class="nc">AbstractByteBufAllocator</span><span class="o">.</span><span class="na">java</span><span class="o">:</span><span class="mi">139</span><span class="o">)</span>
+	<span class="n">at</span> <span class="n">io</span><span class="o">.</span><span class="na">netty</span><span class="o">.</span><span class="na">channel</span><span class="o">.</span><span class="na">DefaultMaxMessagesRecvByteBufAllocator</span><span class="n">$MaxMessageHandle</span><span class="o">.</span><span class="na">allocate</span><span class="o">(</span><span class="nc">DefaultMaxMessagesRecvByteBufAllocator</span><span class="o">.</span><span class="na">java</span><span class="o">:</span><span class="mi">114</span><span class="o">)</span>
+	<span class="n">at</span> <span class="n">io</span><span class="o">.</span><span class="na">netty</span><span class="o">.</span><span class="na">channel</span><span class="o">.</span><span class="na">nio</span><span class="o">.</span><span class="na">AbstractNioByteChannel</span><span class="n">$NioByteUnsafe</span><span class="o">.</span><span class="na">read</span><span class="o">(</span><span class="nc">AbstractNioByteChannel</span><span class="o">.</span><span class="na">java</span><span class="o">:</span><span class="mi">147</span><span class="o">)</span>
+	<span class="n">at</span> <span class="n">io</span><span class="o">.</span><span class="na">netty</span><span class="o">.</span><span class="na">channel</span><span class="o">.</span><span class="na">nio</span><span class="o">.</span><span class="na">NioEventLoop</span><span class="o">.</span><span class="na">processSelectedKey</span><span class="o">(</span><span class="nc">NioEventLoop</span><span class="o">.</span><span class="na">java</span><span class="o">:</span><span class="mi">682</span><span class="o">)</span>
+	<span class="n">at</span> <span class="n">io</span><span class="o">.</span><span class="na">netty</span><span class="o">.</span><span class="na">channel</span><span class="o">.</span><span class="na">nio</span><span class="o">.</span><span class="na">NioEventLoop</span><span class="o">.</span><span class="na">processSelectedKeysOptimized</span><span class="o">(</span><span class="nc">NioEventLoop</span><span class="o">.</span><span class="na">java</span><span class="o">:</span><span class="mi">617</span><span class="o">)</span>
+	<span class="n">at</span> <span class="n">io</span><span class="o">.</span><span class="na">netty</span><span class="o">.</span><span class="na">channel</span><span class="o">.</span><span class="na">nio</span><span class="o">.</span><span class="na">NioEventLoop</span><span class="o">.</span><span class="na">processSelectedKeys</span><span class="o">(</span><span class="nc">NioEventLoop</span><span class="o">.</span><span class="na">java</span><span class="o">:</span><span class="mi">534</span><span class="o">)</span>
+	<span class="n">at</span> <span class="n">io</span><span class="o">.</span><span class="na">netty</span><span class="o">.</span><span class="na">channel</span><span class="o">.</span><span class="na">nio</span><span class="o">.</span><span class="na">NioEventLoop</span><span class="o">.</span><span class="na">run</span><span class="o">(</span><span class="nc">NioEventLoop</span><span class="o">.</span><span class="na">java</span><span class="o">:</span><span class="mi">496</span><span class="o">)</span>
+	<span class="n">at</span> <span class="n">io</span><span class="o">.</span><span class="na">netty</span><span class="o">.</span><span class="na">util</span><span class="o">.</span><span class="na">concurrent</span><span class="o">.</span><span class="na">SingleThreadEventExecutor</span><span class="err">$</span><span class="mi">5</span><span class="o">.</span><span class="na">run</span><span class="o">(</span><span class="nc">SingleThreadEventExecutor</span><span class="o">.</span><span class="na">java</span><span class="o">:</span><span class="mi">906</span><span class="o">)</span>
+	<span class="n">at</span> <span class="n">io</span><span class="o">.</span><span class="na">netty</span><span class="o">.</span><span class="na">util</span><span class="o">.</span><span class="na">internal</span><span class="o">.</span><span class="na">ThreadExecutorMap</span><span class="err">$</span><span class="mi">2</span><span class="o">.</span><span class="na">run</span><span class="o">(</span><span class="nc">ThreadExecutorMap</span><span class="o">.</span><span class="na">java</span><span class="o">:</span><span class="mi">74</span><span class="o">)</span>
+	<span class="n">at</span> <span class="n">java</span><span class="o">.</span><span class="na">lang</span><span class="o">.</span><span class="na">Thread</span><span class="o">.</span><span class="na">run</span><span class="o">(</span><span class="nc">Thread</span><span class="o">.</span><span class="na">java</span><span class="o">:</span><span class="mi">748</span><span class="o">)</span>
+</code></pre></div></div>
+
+<p>是OOM，先<code class="language-plaintext highlighter-rouge">jmap -heap pid</code>发现堆内存正常。接着定位到类 PlatformDependent 源码。</p>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kd">private</span> <span class="kd">static</span> <span class="kt">void</span> <span class="nf">incrementMemoryCounter</span><span class="o">(</span><span class="kt">int</span> <span class="n">capacity</span><span class="o">)</span> <span class="o">{</span>
+        <span class="k">if</span> <span class="o">(</span><span class="no">DIRECT_MEMORY_COUNTER</span> <span class="o">!=</span> <span class="kc">null</span><span class="o">)</span> <span class="o">{</span>
+            <span class="k">for</span> <span class="o">(;;)</span> <span class="o">{</span>
+                <span class="kt">long</span> <span class="n">usedMemory</span> <span class="o">=</span> <span class="no">DIRECT_MEMORY_COUNTER</span><span class="o">.</span><span class="na">get</span><span class="o">();</span>
+                <span class="kt">long</span> <span class="n">newUsedMemory</span> <span class="o">=</span> <span class="n">usedMemory</span> <span class="o">+</span> <span class="n">capacity</span><span class="o">;</span>
+                <span class="k">if</span> <span class="o">(</span><span class="n">newUsedMemory</span> <span class="o">&gt;</span> <span class="no">DIRECT_MEMORY_LIMIT</span><span class="o">)</span> <span class="o">{</span>
+                    <span class="k">throw</span> <span class="k">new</span> <span class="nf">OutOfDirectMemoryError</span><span class="o">(</span><span class="s">"failed to allocate "</span> <span class="o">+</span> <span class="n">capacity</span>
+                            <span class="o">+</span> <span class="s">" byte(s) of direct memory (used: "</span> <span class="o">+</span> <span class="n">usedMemory</span> <span class="o">+</span> <span class="s">", max: "</span> <span class="o">+</span> <span class="no">DIRECT_MEMORY_LIMIT</span> <span class="o">+</span> <span class="sc">')'</span><span class="o">);</span>
+                <span class="o">}</span>
+                <span class="k">if</span> <span class="o">(</span><span class="no">DIRECT_MEMORY_COUNTER</span><span class="o">.</span><span class="na">compareAndSet</span><span class="o">(</span><span class="n">usedMemory</span><span class="o">,</span> <span class="n">newUsedMemory</span><span class="o">))</span> <span class="o">{</span>
+                    <span class="k">break</span><span class="o">;</span>
+                <span class="o">}</span>
+            <span class="o">}</span>
+        <span class="o">}</span>
+    <span class="o">}</span>
+</code></pre></div></div>
+
+<p>是 Netty 抛出的异常，堆外内存不够用了。这个异常曾出现多次，前几次<code class="language-plaintext highlighter-rouge">free</code>发现是机器物理内存不够，重启解决的。上线之后出现了问题发现机器内存是够的。说明发生了堆外内存泄露。</p>
+
+<h2 id="解决问题思路">解决问题思路</h2>
+
+<p>堆外内存大小由 JVM参数 <code class="language-plaintext highlighter-rouge">-XX：MaxDirectMemorySize</code> 指定，如果没有指定，则<strong>默认和最大堆内存（<code class="language-plaintext highlighter-rouge">-Xmx</code>）大小相同</strong>。线上网关 503 重启后，开始在测试环境找出堆外内存泄露的原因。</p>
+
+<p>参考相关博客得知，可以通过监控 PlatformDependent 类的静态变量 <code class="language-plaintext highlighter-rouge">DIRECT_MEMORY_COUNTER</code> 来实时获取堆外内存的占用。使用 Arthas 连接到测试环境网关，<code class="language-plaintext highlighter-rouge">getstatic PlatformDependent DIRECT_MEMORY_COUNTER</code>，该静态对象是 AtomicLong 类型，观看其 Long类型的value即可。在测试页面点了几个请求发现该值并没有增加，考虑可能是并发不够，写程序模拟并发，发现该值只增不降。说明随着请求不断增加，最终发生OOM。</p>
+
+<h2 id="解决问题步骤">解决问题步骤</h2>
+
+<p>在本地直接模拟 OOM 发生找出问题。</p>
+
+<ol>
+  <li>
+    <p><code class="language-plaintext highlighter-rouge">-XX：MaxDirectMemorySize=100M</code>将堆外内存限制调小到100M。</p>
+  </li>
+  <li>
+    <p>写一个类监控堆外内存，每1s 打印一次 <code class="language-plaintext highlighter-rouge">DIRECT_MEMORY_COUNTER</code>的值。</p>
+
+    <div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kn">import</span> <span class="nn">io.netty.util.internal.PlatformDependent</span><span class="o">;</span>
+<span class="kn">import</span> <span class="nn">lombok.extern.slf4j.Slf4j</span><span class="o">;</span>
+<span class="kn">import</span> <span class="nn">org.springframework.stereotype.Component</span><span class="o">;</span>
+<span class="kn">import</span> <span class="nn">org.springframework.util.ReflectionUtils</span><span class="o">;</span>
+   
+<span class="kn">import</span> <span class="nn">javax.annotation.PostConstruct</span><span class="o">;</span>
+<span class="kn">import</span> <span class="nn">java.lang.reflect.Field</span><span class="o">;</span>
+<span class="kn">import</span> <span class="nn">java.nio.ByteBuffer</span><span class="o">;</span>
+<span class="kn">import</span> <span class="nn">java.util.concurrent.TimeUnit</span><span class="o">;</span>
+<span class="kn">import</span> <span class="nn">java.util.concurrent.atomic.AtomicLong</span><span class="o">;</span>
+   
+<span class="cm">/**
+ * @author hjs
+ * @date 2020/1/9
+ **/</span>
+<span class="nd">@Component</span>
+<span class="nd">@Slf4j</span>
+<span class="kd">public</span> <span class="kd">class</span> <span class="nc">DirectoryMemoryMonitor</span> <span class="o">{</span>
+   
+    <span class="kd">private</span> <span class="nc">AtomicLong</span> <span class="n">memory1</span><span class="o">;</span>
+    <span class="kd">private</span> <span class="kt">long</span> <span class="n">memory2</span><span class="o">;</span>
+   
+    <span class="nd">@PostConstruct</span>
+    <span class="kd">public</span> <span class="kt">void</span> <span class="nf">init</span><span class="o">()</span> <span class="o">{</span>
+        <span class="nc">Field</span> <span class="n">field1</span> <span class="o">=</span> <span class="nc">ReflectionUtils</span><span class="o">.</span><span class="na">findField</span><span class="o">(</span><span class="nc">PlatformDependent</span><span class="o">.</span><span class="na">class</span><span class="o">,</span> <span class="s">"DIRECT_MEMORY_COUNTER"</span><span class="o">);</span>
+        <span class="nc">Field</span> <span class="n">field2</span> <span class="o">=</span> <span class="nc">ReflectionUtils</span><span class="o">.</span><span class="na">findField</span><span class="o">(</span><span class="nc">PlatformDependent</span><span class="o">.</span><span class="na">class</span><span class="o">,</span> <span class="s">"DIRECT_MEMORY_LIMIT"</span><span class="o">);</span>
+        <span class="n">field1</span><span class="o">.</span><span class="na">setAccessible</span><span class="o">(</span><span class="kc">true</span><span class="o">);</span>
+        <span class="n">field2</span><span class="o">.</span><span class="na">setAccessible</span><span class="o">(</span><span class="kc">true</span><span class="o">);</span>
+   
+        <span class="k">try</span> <span class="o">{</span>
+            <span class="n">memory1</span> <span class="o">=</span> <span class="o">(</span><span class="nc">AtomicLong</span><span class="o">)</span><span class="n">field1</span><span class="o">.</span><span class="na">get</span><span class="o">(</span><span class="nc">PlatformDependent</span><span class="o">.</span><span class="na">class</span><span class="o">);</span>
+            <span class="n">memory2</span> <span class="o">=</span> <span class="o">(</span><span class="kt">long</span><span class="o">)</span><span class="n">field1</span><span class="o">.</span><span class="na">get</span><span class="o">(</span><span class="nc">PlatformDependent</span><span class="o">.</span><span class="na">class</span><span class="o">);</span>
+        <span class="o">}</span> <span class="k">catch</span> <span class="o">(</span><span class="nc">Exception</span> <span class="n">e</span><span class="o">)</span> <span class="o">{</span>
+        <span class="o">}</span>
+   
+        <span class="k">new</span> <span class="nf">Thread</span><span class="o">(()-&gt;{</span>
+        <span class="k">while</span> <span class="o">(</span><span class="kc">true</span><span class="o">)</span> <span class="o">{</span>
+            <span class="n">log</span><span class="o">.</span><span class="na">info</span><span class="o">(</span><span class="s">"memory: {}"</span><span class="o">,</span> <span class="n">memory1</span><span class="o">);</span>
+            <span class="k">try</span> <span class="o">{</span>
+                <span class="nc">TimeUnit</span><span class="o">.</span><span class="na">SECONDS</span><span class="o">.</span><span class="na">sleep</span><span class="o">(</span><span class="mi">1</span><span class="o">);</span>
+            <span class="o">}</span> <span class="k">catch</span> <span class="o">(</span><span class="nc">InterruptedException</span> <span class="n">e</span><span class="o">)</span> <span class="o">{</span>
+                <span class="n">e</span><span class="o">.</span><span class="na">printStackTrace</span><span class="o">();</span>
+            <span class="o">}</span>
+        <span class="o">}</span>
+        <span class="o">}).</span><span class="na">start</span><span class="o">();</span>
+    <span class="o">}</span>
+<span class="o">}</span>
+</code></pre></div>    </div>
+
+    <p>可以通过反射的方式获取，也可以直接使用 PlatformDependent 类的静态方法。</p>
+  </li>
+  <li>
+    <p>使用 JVM 参数<code class="language-plaintext highlighter-rouge">-Dio.netty.leakDetectionLevel=paranoid</code>将 Netty 监控内存泄露的级别开到最高后模拟OOM，并没有发现警告日志。</p>
+
+    <p>决定使用排除法解决。网关内自己实现的功能是比较少的，除了基础的路由外，功能目前只有鉴权、打印 request 与 response 日志、异常过滤。依次卸载上述功能，发现只有打印请求与响应的日志 Filter 会导致OOM 问题。</p>
+
+    <p>Request 是使用 <code class="language-plaintext highlighter-rouge">exchange.getAttribute("cachedRequestBodyObject")</code>获取的，Response 是使用的ServerHttpResponseDecorator类实现，继续使用排除法，发现是打印Response的问题，代码如下。</p>
+
+    <div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nc">ServerHttpResponseDecorator</span> <span class="n">decoratedResponse</span> <span class="o">=</span> <span class="k">new</span> <span class="nc">ServerHttpResponseDecorator</span><span class="o">(</span><span class="n">response</span><span class="o">)</span> <span class="o">{</span>
+            <span class="nd">@Override</span>
+            <span class="kd">public</span> <span class="nc">Mono</span><span class="o">&lt;</span><span class="nc">Void</span><span class="o">&gt;</span> <span class="nf">writeWith</span><span class="o">(</span><span class="nc">Publisher</span><span class="o">&lt;?</span> <span class="kd">extends</span> <span class="nc">DataBuffer</span><span class="o">&gt;</span> <span class="n">body</span><span class="o">)</span> <span class="o">{</span>
+                <span class="k">if</span> <span class="o">(</span><span class="n">body</span> <span class="k">instanceof</span> <span class="nc">Flux</span><span class="o">)</span> <span class="o">{</span>
+                    <span class="nc">Flux</span><span class="o">&lt;?</span> <span class="kd">extends</span> <span class="nc">DataBuffer</span><span class="o">&gt;</span> <span class="n">fluxBody</span> <span class="o">=</span> <span class="o">(</span><span class="nc">Flux</span><span class="o">&lt;?</span> <span class="kd">extends</span> <span class="nc">DataBuffer</span><span class="o">&gt;)</span> <span class="n">body</span><span class="o">;</span>
+                    <span class="k">return</span> <span class="kd">super</span><span class="o">.</span><span class="na">writeWith</span><span class="o">(</span><span class="n">fluxBody</span><span class="o">.</span><span class="na">map</span><span class="o">(</span><span class="n">dataBuffer</span> <span class="o">-&gt;</span> <span class="o">{</span>
+                        <span class="c1">// probably should reuse buffers</span>
+                        <span class="kt">byte</span><span class="o">[]</span> <span class="n">content</span> <span class="o">=</span> <span class="k">new</span> <span class="kt">byte</span><span class="o">[</span><span class="n">dataBuffer</span><span class="o">.</span><span class="na">readableByteCount</span><span class="o">()];</span>
+                        <span class="nc">String</span> <span class="n">response</span> <span class="o">=</span> <span class="k">new</span> <span class="nc">String</span><span class="o">(</span><span class="n">content</span><span class="o">,</span> <span class="nc">Charset</span><span class="o">.</span><span class="na">forName</span><span class="o">(</span><span class="s">"UTF-8"</span><span class="o">));</span>
+                        <span class="nc">DataBufferUtils</span><span class="o">.</span><span class="na">release</span><span class="o">(</span><span class="n">dataBuffer</span><span class="o">);</span>
+                        <span class="kt">long</span> <span class="n">endTime</span> <span class="o">=</span> <span class="nc">System</span><span class="o">.</span><span class="na">currentTimeMillis</span><span class="o">();</span>
+                        <span class="n">reportLog</span><span class="o">(</span><span class="n">requestPath</span><span class="o">,</span> <span class="no">JSON</span><span class="o">.</span><span class="na">toJSONString</span><span class="o">(</span><span class="n">param</span><span class="o">),</span> <span class="n">remoteAddress</span><span class="o">,</span> <span class="n">startTime</span><span class="o">,</span> <span class="n">endTime</span><span class="o">,</span> <span class="n">response</span><span class="o">,</span> <span class="n">userAgent</span><span class="o">,</span> <span class="n">deviceType</span><span class="o">,</span> <span class="n">appVersion</span><span class="o">,</span> <span class="n">mid</span><span class="o">,</span> <span class="kc">null</span><span class="o">,</span> <span class="kc">null</span><span class="o">,</span> <span class="kc">null</span><span class="o">);</span>
+                        <span class="k">return</span> <span class="n">bufferFactory</span><span class="o">.</span><span class="na">wrap</span><span class="o">(</span><span class="n">content</span><span class="o">);</span>
+                    <span class="o">}));</span>
+                <span class="o">}</span> <span class="k">else</span> <span class="o">{</span>
+                    <span class="k">return</span> <span class="kd">super</span><span class="o">.</span><span class="na">writeWith</span><span class="o">(</span><span class="n">body</span><span class="o">);</span>
+                <span class="o">}</span>
+            <span class="o">}</span>
+        <span class="o">};</span>
+</code></pre></div>    </div>
+
+    <p>可以发现这里拿出 buffer 进行读取后，就没有后续操作了，返回的是读取处理后的 content，尝试直接手动释放掉buffer，读取后的代码添加一行 <code class="language-plaintext highlighter-rouge">DataBufferUtils.release(dataBuffer);</code>。继续测试发现，问题解决。</p>
+
+    <h2 id="问题思考">问题思考</h2>
+
+    <ol>
+      <li>
+        <p>Netty buffer的释放机制。</p>
+
+        <p>本次 OOM 原因与 Netty 的 UnpooledHeapByteBuf 有关，暂略。</p>
+      </li>
+      <li>
+        <p>我们 read 出 body，是用于一个全局的 log Response 的操作，但是这样的话，相当于多了一次从堆外内存到 JVM 堆内存的拷贝，是否破坏了网关的高效性呢？</p>
+      </li>
+    </ol>
+  </li>
+</ol>
+:ET
